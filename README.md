@@ -1,1 +1,2 @@
-# spinn
+# spinn - Simple Physics Informed Neural Networks
+Makes PINNs easy (with jax), see examples...
