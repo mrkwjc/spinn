@@ -1,0 +1,25 @@
+name: Python Package using Conda
+
+on: [push]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 5
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    - name: Install spinn
+      run: |
+        pip install pytest
+        pip install .
+    - name: Test spinn
+      run: |
+        pytest .
+        cd examples
+        python xor.py
