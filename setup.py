@@ -21,5 +21,5 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     python_requires='>=3.6',
-    install_requires=['jax', 'numpy', 'scipy', 'networkx'],
+    install_requires=['jax', 'jaxlib', 'numpy', 'scipy', 'networkx'],
 )
