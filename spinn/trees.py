@@ -6,11 +6,12 @@ from functools import partial
 from scipy.optimize import minimize
 from jax.experimental.sparse import BCOO
 from spinn import utils, graphs
+import pickle
 
 # import os
 # os.environ['CUDA_VISIBLE_DEVICES'] = ''
 # jax.config.update("jax_enable_x64", True)
-# jax.config.update('jax_default_matmul_precision', 'high')  # 'bfloat16_3x'
+jax.config.update('jax_default_matmul_precision', 'high')  # 'bfloat16_3x'
 
 
 class spinn:
@@ -33,8 +34,8 @@ class spinn:
         conecs = [list(zip(*H.in_edges(li))) for li in layers[1:]]
         wmrk = utils.pacc([0] + [len(ci[0]) for ci in conecs])
         bmrk = utils.pacc([wmrk[-1][1]] + arch[1:])
-        inps = sorted((n for n, d in G.in_degree() if d == 0))
-        outs = sorted((n for n, d in G.out_degree() if d == 0))
+        inps = sorted((n for n, d in H.in_degree() if d == 0))
+        outs = sorted((n for n, d in H.out_degree() if d == 0))
         f, p = utils.unroll_fp(f, p, arch)
         self.nlst = nlst
         self.n = len(H)
@@ -286,6 +287,19 @@ class spinn:
             jax.tree_util.register_pytree_node(cls,
                                                cls._tree_flatten,
                                                cls._tree_unflatten)
+
+    def dump(self, fname):
+        (children, aux_data) = self._tree_flatten()
+        with open(fname, 'wb') as f:
+            pickle.dump((children, aux_data), f)
+
+    @classmethod
+    def load(cls, fname):
+        with open(fname, 'rb') as f:
+            (children, aux_data) = pickle.load(f)
+        obj = cls._tree_unflatten(aux_data, children)
+        obj._register_pytree()
+        return obj
 
 
 if __name__ == "__main__":
