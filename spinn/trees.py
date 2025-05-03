@@ -301,6 +301,10 @@ class spinn:
         obj._register_pytree()
         return obj
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._register_pytree()
+
 
 if __name__ == "__main__":
     import os
