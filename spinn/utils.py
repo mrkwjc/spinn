@@ -99,7 +99,7 @@ def meshgrid(*arrs):
             if j != i:
                 arr2 = arr2.repeat(sz, axis=j)
         ans.append(arr2)
-    return tuple(ans)
+    return tuple(ans[::-1])
 
 
 def hcube(dims, n=11, origin=None):
