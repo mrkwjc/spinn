@@ -45,7 +45,7 @@ class spinn:
         self.no = len(self.outs)
         self.nw = len(H.edges)
         self.nb = self.n - self.ni
-        self.wshp = [(s, (tuple(np.asarray(i1)-i1[0]), i0), wm, bm)
+        self.wshp = [(s, (tuple((np.asarray(i1)-i1[0]).tolist()), i0), wm, bm)
                      for s, (i0, i1), wm, bm in zip(sizes, conecs, wmrk, bmrk)]
         self.f = f
         self.p = p
@@ -105,6 +105,8 @@ class spinn:
                 return jax.nn.sigmoid(xi, *p)
             case 'softplus':
                 return jax.nn.softplus(xi, *p)
+            case 'sin':
+                return jax.numpy.sin(xi, *p)
             case _:
                 return f(xi, *p)
 
@@ -227,7 +229,7 @@ class spinn:
                       'fun': self.ineqc,
                       'jac': self.ineqcj,
                       'args': args}]
-        method = 'BFGS' if len(cstr) == 0 else 'SLSQP'
+        method = 'L-BFGS-B' if len(cstr) == 0 else 'SLSQP'
         if method == 'SLSQP':
             options['ftol'] = tol  # it seems this is set here
         res = minimize(self.loss, self.w, args, jac=self.lossg,
@@ -290,6 +292,12 @@ class spinn:
 
     def dump(self, fname):
         (children, aux_data) = self._tree_flatten()
+        # pickle lists
+        w, p = children
+        wlst = w.tolist()
+        plst = [[pij.tolist() for pij in pi] for pi in p]
+        children = (wlst, plst)
+        #
         with open(fname, 'wb') as f:
             pickle.dump((children, aux_data), f)
 
@@ -297,6 +305,12 @@ class spinn:
     def load(cls, fname):
         with open(fname, 'rb') as f:
             (children, aux_data) = pickle.load(f)
+        # make arrays again
+        wlst, plst = children
+        w = jnp.asarray(wlst)
+        p = [[jnp.asarray(pij) for pij in pi] for pi in plst]
+        children = (w, p)
+        #
         obj = cls._tree_unflatten(aux_data, children)
         obj._register_pytree()
         return obj
