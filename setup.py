@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="spinn",
-    version="0.1.0",
+    version="0.2.0",
     author="Marek Wojciechowski",
     author_email="mwojc@p.lodz.pl",
     description="Simple Physics Informed Neural Networks",
