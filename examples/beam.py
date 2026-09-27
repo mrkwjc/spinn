@@ -34,14 +34,14 @@ class beam(spinn):
 
 if __name__ == "__main__":
     L = 4.
-    x = hcube(L, n=201)
+    x = hcube(L, n=401)
     q = -8 * jnp.sin(jnp.pi*(x/L))
     bx = x[jnp.asarray([0, -1])]  # boundary
-    lmbd = [1., 1., 1.]
+    lmbd = [10., 1., 1.]
 
     G = mlgraph((1, 32, 1))
     B = beam(G, initx=x)
-    B.train(x, q, bx, lmbd, tol=1e-4, maxiter=5000, disp=True)
+    B.train(x, q, bx, lmbd, tol=1e-8, maxiter=5000, disp=True)
 
     # Plot
     import pylab

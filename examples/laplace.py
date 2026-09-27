@@ -53,7 +53,7 @@ if __name__ == "__main__":
 
     G = mlgraph((2, 16, 16, 1))
     PDE = laplace(G, initx=x)
-    PDE.train(x, q, bx, lmbd, tol=1e-5, maxiter=5000, disp=True)
+    PDE.train(x, q, bx, lmbd, tol=1e-8, maxiter=5000, disp=True)
 
     #
     # Plots

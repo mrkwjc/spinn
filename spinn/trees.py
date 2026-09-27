@@ -216,7 +216,8 @@ class spinn:
     # but cannot be jitted...
     def train(self, *args, tol=1e-5, maxiter=None, disp=False, **kwargs):
         options = kwargs.pop('options', {})
-        options.setdefault('maxiter', maxiter)
+        if maxiter is not None:
+            options.setdefault('maxiter', maxiter)
         options.setdefault('disp', disp)
         cstr = []
         if hasattr(self, 'eqc'):
@@ -232,6 +233,8 @@ class spinn:
         method = 'L-BFGS-B' if len(cstr) == 0 else 'SLSQP'
         if method == 'SLSQP':
             options['ftol'] = tol  # it seems this is set here
+        if method in ['L-BFGS-B']:
+            options.pop('disp')
         res = minimize(self.loss, self.w, args, jac=self.lossg,
                        method=method,
                        tol=tol,
