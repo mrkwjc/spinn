@@ -219,23 +219,32 @@ class spinn:
         if maxiter is not None:
             options.setdefault('maxiter', maxiter)
         options.setdefault('disp', disp)
+
+        # scipy optimizers (SLSQP since scipy 1.16 strictly) require float64,
+        # while jax works in float32 by default, so we convert here
+        def f64(fun):
+            def wrapped(*a):
+                return np.asarray(fun(*a), dtype=np.float64)
+            return wrapped
+
         cstr = []
         if hasattr(self, 'eqc'):
             cstr += [{'type': 'eq',
-                      'fun': self.eqc,
-                      'jac': self.eqcj,
+                      'fun': f64(self.eqc),
+                      'jac': f64(self.eqcj),
                       'args': args}]
         if hasattr(self, 'ineqc'):
             cstr += [{'type': 'ineq',
-                      'fun': self.ineqc,
-                      'jac': self.ineqcj,
+                      'fun': f64(self.ineqc),
+                      'jac': f64(self.ineqcj),
                       'args': args}]
         method = 'L-BFGS-B' if len(cstr) == 0 else 'SLSQP'
         if method == 'SLSQP':
             options['ftol'] = tol  # it seems this is set here
         if method in ['L-BFGS-B']:
             options.pop('disp')
-        res = minimize(self.loss, self.w, args, jac=self.lossg,
+        res = minimize(f64(self.loss), np.asarray(self.w, dtype=np.float64),
+                       args, jac=f64(self.lossg),
                        method=method,
                        tol=tol,
                        constraints=cstr,
