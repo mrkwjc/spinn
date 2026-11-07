@@ -7,9 +7,9 @@ class beam(spinn):
     """
     Solve fourth order Euler-Bernoulli beam equation
 
-        dFxxxx = q(x),      q(x) = -q0 * sin(pi*x/L)
+        EI * dFxxxx = q(x),      q(x) = -q0 * sin(pi*x/L)
 
-    subject to:
+    where EI is the bending stiffness, subject to:
 
         F = 0       at  x=0, x=L
         dFx = 0     at  x=0, x=L
@@ -17,7 +17,7 @@ class beam(spinn):
     (beam clamped at both ends) via *unconstrained multi-objective
     optimization*.
 
-    With k = pi/L and c = q0/k**4 the exact solution is:
+    With k = pi/L and c = q0/(EI*k**4) the exact solution is:
 
         F(x) = -c * (sin(k*x) - k*x*(L - x)/L)
 
@@ -26,37 +26,38 @@ class beam(spinn):
     """
 
     @jax.jit
-    def loss(self, w, x, q, bx, lmbd):
+    def loss(self, w, x, q, bx, EI, lmbd):
         self.w = jnp.asarray(w)
 
         F, dFx, dFxxxx = self.propx([[bx, 0],
                                      [bx, 0, 0],
                                      [x,  0, 0, 0, 0, 0]])
 
-        e1 = self.mse(dFxxxx, q)
+        e1 = self.mse(EI*dFxxxx, q)
         e2 = self.mse(F,      0)
         e3 = self.mse(dFx,    0)
         l1, l2, l3 = lmbd
         return l1*e1 + l2*e2 + l3*e3
 
 
-def exact(x, q0, L):
+def exact(x, q0, L, EI):
     """Exact F and its derivatives up to the 4th order."""
     x = x.ravel()
     k = jnp.pi / L
-    c = q0 / k**4
+    c = q0 / (EI * k**4)
     s, co = jnp.sin(k*x), jnp.cos(k*x)
     F = -c * (s - k*x*(L - x)/L)
     dFx = -c * (k*co - k*(L - 2*x)/L)
     dFxx = -c * (-k**2*s + 2*k/L)
     dFxxx = c * k**3 * co
-    dFxxxx = -q0 * s
+    dFxxxx = -q0 * s / EI
     return F, dFx, dFxx, dFxxx, dFxxxx
 
 
 if __name__ == "__main__":
     L = 4.
     q0 = 8.
+    EI = 1.  # bending stiffness
     x = hcube(L, n=401)
     q = -q0 * jnp.sin(jnp.pi*(x/L))
     bx = x[jnp.asarray([0, -1])]  # boundary
@@ -64,7 +65,7 @@ if __name__ == "__main__":
 
     G = mlgraph((1, 32, 1))
     B = beam(G, initx=x)
-    B.train(x, q, bx, lmbd, tol=1e-8, maxiter=5000)
+    B.train(x, q, bx, EI, lmbd, tol=1e-8, maxiter=5000)
 
     # Compare with theoretical solution
     names = ['F', 'dFx', 'dFxx', 'dFxxx', 'dFxxxx']
@@ -73,7 +74,7 @@ if __name__ == "__main__":
                     [x, 0, 0, 0],
                     [x, 0, 0, 0, 0],
                     [x, 0, 0, 0, 0, 0]])
-    theory = exact(x, q0, L)
+    theory = exact(x, q0, L, EI)
 
     print('%-7s %12s %12s %12s' % ('', 'RMSE', 'Max abs err', 'Rel. L2 err'))
     for name, Fp, Fe in zip(names, pinn, theory):
