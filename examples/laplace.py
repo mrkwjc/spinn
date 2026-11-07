@@ -11,11 +11,20 @@ class laplace(spinn):
 
     subject to:
 
-        F = 0       at  x=0         (left)
-        F = y       at  x=L         (right)
-        dFy = 0     at  y=0, y=B    (bottom, top)
+        F = 0                           at  x=0         (left)
+        F = B/2 * (1 - cos(pi*y/B))     at  x=L         (right)
+        dFy = 0                         at  y=0, y=B    (bottom, top)
 
     via *unconstrained multi-objective optimization*.
+
+    The right edge profile has zero slope at y=0 and y=B, so the boundary
+    data are *compatible* at the corners (L, 0) and (L, B) with dFy = 0
+    on the bottom and top edges. (A simpler choice like F = y would give
+    dFy = 1 there and a singular solution at these corners.) Thus the
+    solution is smooth and given exactly by:
+
+        F(x, y) = B/2 * x/L
+                - B/2 * cos(pi*y/B) * sinh(pi*x/B) / sinh(pi*L/B)
     """
 
     @jax.jit
@@ -42,36 +51,80 @@ class laplace(spinn):
         return l1*e1 + l2*e2 + l3*e3 + l4*e4 + l5*e5
 
 
+def exact(x, L, B):
+    X, Y = x[:, 0], x[:, 1]
+    k = jnp.pi / B
+    return B/2 * X/L - B/2 * jnp.cos(k*Y) * jnp.sinh(k*X) / jnp.sinh(k*L)
+
+
 if __name__ == "__main__":
     n = 21
     L = 1.
-    B = 2.
+    B = 1.
     x = hcube((L, B), n=n)
     bx = left(x), right(x), bottom(x), top(x)
-    q = jnp.linspace(0., B, n)
-    lmbd = [1., 1., 100., 1., 1.]
+    q = B/2 * (1 - jnp.cos(jnp.pi * bx[1][:, 1] / B))
+    lmbd = [1., 10., 10., 1., 1.]
 
     G = mlgraph((2, 16, 16, 1))
     PDE = laplace(G, initx=x)
-    PDE.train(x, q, bx, lmbd, tol=1e-8, maxiter=5000, disp=True)
+    PDE.train(x, q, bx, lmbd, tol=1e-10, maxiter=5000)
+
+    # Compare with theoretical solution on the training grid...
+    F = PDE(x).T[0]
+    Fe = exact(x, L, B)
+    print('Training grid (%dx%d):' % (n, n))
+    print('  RMSE vs exact:    ', spinn.rmse(F, Fe))
+    print('  Max abs error:    ', jnp.abs(F - Fe).max())
+    print('  Relative L2 error:', jnp.linalg.norm(F - Fe) / jnp.linalg.norm(Fe))
+
+    # ...and on a finer grid (points not seen during training)
+    m = 101
+    xt = hcube((L, B), n=m)
+    Ft = PDE(xt).T[0]
+    Fte = exact(xt, L, B)
+    print('Test grid (%dx%d):' % (m, m))
+    print('  RMSE vs exact:    ', spinn.rmse(Ft, Fte))
+    print('  Max abs error:    ', jnp.abs(Ft - Fte).max())
+    print('  Relative L2 error:', jnp.linalg.norm(Ft - Fte) / jnp.linalg.norm(Fte))
 
     #
     # Plots
     import matplotlib.pyplot as plt
-    from matplotlib import cm
 
-    def plot2D(x, y, F):
-        fig = plt.figure(figsize=(9, 6))
-        ax = fig.add_subplot(111, projection='3d')
-        ax.plot_surface(x, y, F,  cmap=cm.viridis)
-        # ax.set_xlim(xmin, xmax)
-        # ax.set_ylim(ymin, ymax)
-        ax.view_init(30, 225)
-        ax.set_xlabel('')
-        ax.set_ylabel('')
-        plt.show()
+    X = xt.T[0].reshape(m, m)
+    Y = xt.T[1].reshape(m, m)
+    Ft = Ft.reshape(m, m)
+    Fte = Fte.reshape(m, m)
 
-    plot2D(x.T[0].reshape(n, n),
-           x.T[1].reshape(n, n),
-           PDE(x).T[0].reshape(n, n))
+    fig = plt.figure(figsize=(15, 5), layout='constrained')
 
+    # common color scale for both solutions
+    norm = plt.Normalize(vmin=min(Ft.min(), Fte.min()),
+                         vmax=max(Ft.max(), Fte.max()))
+
+    ax1 = fig.add_subplot(131, projection='3d')
+    s = ax1.plot_surface(X, Y, Ft, cmap='viridis', norm=norm)
+    ax1.view_init(30, 225)
+    ax1.set_xlabel('x')
+    ax1.set_ylabel('y')
+    ax1.set_title('PINN solution')
+
+    ax2 = fig.add_subplot(132, projection='3d')
+    ax2.plot_surface(X, Y, Fte, cmap='viridis', norm=norm)
+    ax2.view_init(30, 225)
+    ax2.set_xlabel('x')
+    ax2.set_ylabel('y')
+    ax2.set_title('Exact solution')
+
+    fig.colorbar(s, ax=[ax1, ax2], shrink=0.6)
+
+    ax = fig.add_subplot(133)
+    c = ax.contourf(X, Y, Ft - Fte, levels=21, cmap='viridis')
+    fig.colorbar(c, ax=ax)
+    ax.set_aspect('equal')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_title('Error: PINN - exact')
+
+    plt.show()
