@@ -180,6 +180,29 @@ class spinn:
         return self.loss(w, *args)
 
     @jax.jit
+    def _ploss(self, w, mu, *args):
+        """
+        Penalty loss composed automatically from 'loss' and constraints:
+
+            loss + mu * (sum(eqc**2) + sum(min(ineqc, 0)**2))
+
+        i.e. equality constraints (eqc = 0) are penalized always and
+        inequality constraints (ineqc >= 0) only when violated.
+        Used in 'train' for warm start of constrained optimization.
+        """
+        p = self.loss(w, *args)
+        if hasattr(self, 'eqc'):
+            p += mu * jnp.sum(self.eqc(w, *args)**2)
+        if hasattr(self, 'ineqc'):
+            p += mu * jnp.sum(jnp.minimum(self.ineqc(w, *args), 0.)**2)
+        return p
+
+    @jax.jit
+    @partial(jax.grad, argnums=1)
+    def _plossg(self, w, mu, *args):
+        return self._ploss(w, mu, *args)
+
+    @jax.jit
     @partial(jax.jacobian, argnums=1)
     def eqcj(self, w, *args):
         return self.eqc(w, *args)
@@ -214,28 +237,59 @@ class spinn:
 
     # We use scipy.optimize.minimize here. It has many advantages,
     # but cannot be jitted...
-    def train(self, *args, tol=1e-5, maxiter=None, disp=False, **kwargs):
+    def train(self, *args, tol=1e-5, maxiter=None, disp=False, method=None,
+              warm=0, mu=1., **kwargs):
+        """
+        Train network with scipy.optimize.minimize.
+
+        If 'eqc' or 'ineqc' methods are defined, constrained optimization
+        is performed ('SLSQP' by default), otherwise 'L-BFGS-B' is used.
+        Pass 'method' to override this choice.
+
+        If 'warm' > 0 and constraints are present, first 'warm' iterations
+        of 'L-BFGS-B' are done on the penalty loss '_ploss' (with penalty
+        coefficient 'mu') and constrained optimization starts from there.
+        This prevents divergence of SLSQP from poor initial weights.
+        """
         options = kwargs.pop('options', {})
         if maxiter is not None:
             options.setdefault('maxiter', maxiter)
         options.setdefault('disp', disp)
+
+        # scipy optimizers (SLSQP since scipy 1.16 strictly) require float64,
+        # while jax works in float32 by default, so we convert here
+        def f64(fun):
+            def wrapped(*a):
+                return np.asarray(fun(*a), dtype=np.float64)
+            return wrapped
+
         cstr = []
         if hasattr(self, 'eqc'):
             cstr += [{'type': 'eq',
-                      'fun': self.eqc,
-                      'jac': self.eqcj,
+                      'fun': f64(self.eqc),
+                      'jac': f64(self.eqcj),
                       'args': args}]
         if hasattr(self, 'ineqc'):
             cstr += [{'type': 'ineq',
-                      'fun': self.ineqc,
-                      'jac': self.ineqcj,
+                      'fun': f64(self.ineqc),
+                      'jac': f64(self.ineqcj),
                       'args': args}]
-        method = 'L-BFGS-B' if len(cstr) == 0 else 'SLSQP'
+        if method is None:
+            method = 'L-BFGS-B' if len(cstr) == 0 else 'SLSQP'
         if method == 'SLSQP':
             options['ftol'] = tol  # it seems this is set here
         if method in ['L-BFGS-B']:
             options.pop('disp')
-        res = minimize(self.loss, self.w, args, jac=self.lossg,
+        w0 = np.asarray(self.w, dtype=np.float64)
+        if warm and len(cstr):
+            res = minimize(f64(self._ploss), w0, (mu,) + args,
+                           jac=f64(self._plossg),
+                           method='L-BFGS-B',
+                           tol=tol,
+                           options={'maxiter': warm})
+            w0 = res.x
+        res = minimize(f64(self.loss), w0,
+                       args, jac=f64(self.lossg),
                        method=method,
                        tol=tol,
                        constraints=cstr,
