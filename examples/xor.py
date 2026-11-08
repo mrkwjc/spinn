@@ -3,7 +3,7 @@ Plain supervised training on data -- no physics involved.
 
 This example shows that the 'spinn' class can be used directly as an
 ordinary feed-forward neural network, fitted to input/target pairs only.
-The default 'loss' method is just the mean squared error between network
+The default 'terms' method is just the mean squared error between network
 outputs and targets, so no subclassing is needed:
 
     N = spinn(G, initx=x, inity=t)

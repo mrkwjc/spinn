@@ -6,6 +6,7 @@ from functools import partial
 from scipy.optimize import minimize
 from jax.experimental.sparse import BCOO
 from spinn import utils, graphs
+from spinn import balance as balancing
 import pickle
 
 # import os
@@ -15,6 +16,8 @@ jax.config.update('jax_default_matmul_precision', 'high')  # 'bfloat16_3x'
 
 
 class spinn:
+    lmbd = None  # weights of the loss terms after 'train'
+
     def __init__(self, G, f=None, p=None,
                  initx=None, inity=None,
                  key=None,
@@ -165,52 +168,55 @@ class spinn:
     #     return self._propd(x, spec)
 
     @jax.jit
-    def loss(self, w, x, t):
+    def terms(self, w, x, t):
+        """
+        Terms of the loss function. Override this to define the problem:
+        return a sequence of scalars, with the equation (PDE residual)
+        first and the remaining conditions after it, or a single scalar
+        (then it is minimized as is). The first term is the reference for
+        balancing (see 'train'). By default there is one term, the data fit
+        mse(self(x), t).
+        """
         self.w = jnp.asarray(w)
-        return self.mse(self(x), t)
+        return (self.mse(self(x), t),)
+
+    def _terms(self, w, *args):
+        T = self.terms(w, *args)
+        if isinstance(T, (list, tuple)):
+            return jnp.concatenate([jnp.ravel(jnp.asarray(t)) for t in T])
+        return jnp.ravel(jnp.asarray(T))
+
+    @jax.jit
+    def _loss(self, w, lmbd, *args):
+        """Weighted sum of terms, sum(lmbd * terms), minimized by 'train'."""
+        return jnp.sum(lmbd * self._terms(w, *args))
+
+    @jax.jit
+    @partial(jax.grad, argnums=1)
+    def _lossg(self, w, lmbd, *args):
+        return self._loss(w, lmbd, *args)
+
+    def loss(self, w, *args, lmbd=None):
+        """Loss: sum of 'terms', weighted by 'lmbd' if given."""
+        T = self._terms(w, *args)
+        return jnp.sum(T) if lmbd is None else jnp.sum(jnp.asarray(lmbd)*T)
 
     @jax.jit
     @partial(jax.grad, argnums=1)
     def lossg(self, w, *args):
-        return self.loss(w, *args)
+        """Gradient of the (unweighted) loss."""
+        return jnp.sum(self._terms(w, *args))
 
     @jax.jit
     @partial(jax.value_and_grad, argnums=1)
     def lossvg(self, w, *args):
-        return self.loss(w, *args)
+        return jnp.sum(self._terms(w, *args))
 
     @jax.jit
-    def _ploss(self, w, mu, *args):
-        """
-        Penalty loss composed automatically from 'loss' and constraints:
-
-            loss + mu * (sum(eqc**2) + sum(min(ineqc, 0)**2))
-
-        i.e. equality constraints (eqc = 0) are penalized always and
-        inequality constraints (ineqc >= 0) only when violated.
-        Used in 'train' for warm start of constrained optimization.
-        """
-        p = self.loss(w, *args)
-        if hasattr(self, 'eqc'):
-            p += mu * jnp.sum(self.eqc(w, *args)**2)
-        if hasattr(self, 'ineqc'):
-            p += mu * jnp.sum(jnp.minimum(self.ineqc(w, *args), 0.)**2)
-        return p
-
-    @jax.jit
-    @partial(jax.grad, argnums=1)
-    def _plossg(self, w, mu, *args):
-        return self._ploss(w, mu, *args)
-
-    @jax.jit
-    @partial(jax.jacobian, argnums=1)
-    def eqcj(self, w, *args):
-        return self.eqc(w, *args)
-
-    @jax.jit
-    @partial(jax.jacobian, argnums=1)
-    def ineqcj(self, w, *args):
-        return self.ineqc(w, *args)
+    def _termsgn(self, w, *args):
+        """Norms of the gradients of each loss term (w.r.t. weights)."""
+        J = jax.jacrev(lambda w: self._terms(w, *args))(w)
+        return jnp.sqrt(jnp.sum(J**2, axis=1))
 
     # @jax.jit
     # def loss(self, w, *args):
@@ -237,65 +243,107 @@ class spinn:
 
     # We use scipy.optimize.minimize here. It has many advantages,
     # but cannot be jitted...
-    def train(self, *args, tol=1e-5, maxiter=None, disp=False, method=None,
-              warm=0, mu=1., **kwargs):
+    def train(self, *args, tol=1e-10, maxiter=None, disp=False,
+              method='L-BFGS-B', balance='grad', **kwargs):
         """
-        Train network with scipy.optimize.minimize.
+        Train network with scipy.optimize.minimize ('L-BFGS-B' by default)
+        on the weighted sum of 'terms':
 
-        If 'eqc' or 'ineqc' methods are defined, constrained optimization
-        is performed ('SLSQP' by default), otherwise 'L-BFGS-B' is used.
-        Pass 'method' to override this choice.
+            sum(lmbd * terms)
 
-        If 'warm' > 0 and constraints are present, first 'warm' iterations
-        of 'L-BFGS-B' are done on the penalty loss '_ploss' (with penalty
-        coefficient 'mu') and constrained optimization starts from there.
-        This prevents divergence of SLSQP from poor initial weights.
+        The weights 'lmbd' are set by the balancer 'balance' (see module
+        'spinn.balance'): the optimizer runs 'inner' iterations with fixed
+        weights, then the weights are updated and this is repeated. The
+        first term is the reference (put the equation first). 'balance' is
+
+            name     - balancer from spinn.balance with default options:
+                       'grad' (default)
+            class    - balancer class (default options)
+            instance - balancer with own options, e.g. grad(lmax=1e3)
+            sequence - fixed weights, one per term
+            None     - equal weights, i.e. plain sum of terms
+
+        With one term balancing does nothing, so a single term returned by
+        'terms' (combined in any way) is minimized as is.
+
+        'disp' prints the terms, the weights and the number of iterations
+        after each optimizer run (scipy's own output, where supported, is
+        switched on with options={'disp': True}).
+
+        'maxiter' limits the total number of optimizer iterations (default
+        15000). Other keyword arguments (e.g. 'options', 'callback') are
+        passed to scipy.optimize.minimize. The weights are returned in
+        'res.lmbd' (and kept in 'self.lmbd'), the unweighted terms in
+        'res.terms'; 'res.fun' is the weighted loss, 'res.nouter' the
+        number of optimizer runs.
         """
-        options = kwargs.pop('options', {})
-        if maxiter is not None:
-            options.setdefault('maxiter', maxiter)
-        options.setdefault('disp', disp)
+        if type(self).loss is not spinn.loss:
+            raise AttributeError("'loss' cannot be overridden any more, "
+                                 "rename it to 'terms'")
+        if hasattr(self, 'eqc') or hasattr(self, 'ineqc'):
+            raise AttributeError("'eqc' and 'ineqc' are not supported any "
+                                 "more, return the constraints as 'terms' "
+                                 "after the equation")
+        options = dict(kwargs.pop('options', None) or {})
+        callback = kwargs.pop('callback', None)
+        b = balancing.get(balance)
+        if maxiter is None:
+            maxiter = 15000  # scipy's default for L-BFGS-B
 
-        # scipy optimizers (SLSQP since scipy 1.16 strictly) require float64,
-        # while jax works in float32 by default, so we convert here
         def f64(fun):
             def wrapped(*a):
                 return np.asarray(fun(*a), dtype=np.float64)
             return wrapped
 
-        cstr = []
-        if hasattr(self, 'eqc'):
-            cstr += [{'type': 'eq',
-                      'fun': f64(self.eqc),
-                      'jac': f64(self.eqcj),
-                      'args': args}]
-        if hasattr(self, 'ineqc'):
-            cstr += [{'type': 'ineq',
-                      'fun': f64(self.ineqc),
-                      'jac': f64(self.ineqcj),
-                      'args': args}]
-        if method is None:
-            method = 'L-BFGS-B' if len(cstr) == 0 else 'SLSQP'
-        if method == 'SLSQP':
-            options['ftol'] = tol  # it seems this is set here
-        if method in ['L-BFGS-B']:
-            options.pop('disp')
-        w0 = np.asarray(self.w, dtype=np.float64)
-        if warm and len(cstr):
-            res = minimize(f64(self._ploss), w0, (mu,) + args,
-                           jac=f64(self._plossg),
-                           method='L-BFGS-B',
-                           tol=tol,
-                           options={'maxiter': warm})
-            w0 = res.x
-        res = minimize(f64(self.loss), w0,
-                       args, jac=f64(self.lossg),
-                       method=method,
-                       tol=tol,
-                       constraints=cstr,
-                       options=options,
-                       **kwargs)
-        self.w = jnp.asarray(res.x)
+        def terms(w):
+            return np.asarray(self._terms(w, *args), np.float64)
+
+        def run(w, lmbd, n):
+            opts = dict(options, maxiter=n)
+            if method == 'L-BFGS-B':
+                # scipy's default maxfun=15000 would stop long runs early
+                opts.setdefault('maxfun', 10*n)
+            return minimize(f64(self._loss), w,
+                            (jnp.asarray(lmbd, dtype),) + args,
+                            jac=f64(self._lossg), method=method, tol=tol,
+                            options=opts, callback=callback, **kwargs)
+
+        def weights(w):
+            return np.asarray(b(self, w, *args), np.float64)
+
+        w = np.asarray(self.w, dtype=np.float64)
+        dtype = jnp.asarray(self.w).dtype
+        if len(terms(w)) < 2:
+            b = balancing.fixed()  # one term, nothing to balance
+        lmbd = weights(w)
+        nit = nfev = k = 0
+        while True:
+            res = run(w, lmbd, int(min(b.inner, maxiter - nit)))
+            w = res.x
+            nit += res.nit
+            nfev += res.nfev
+            k += 1
+            if disp:
+                fmt = {'float_kind': lambda v: '%.2e' % v}
+                print('run %3d: nit %5d  terms %s  lmbd %s'
+                      % (k, res.nit,
+                         np.array2string(terms(w), formatter=fmt),
+                         np.array2string(lmbd, formatter=fmt)))
+            # stopped by callback, no progress (e.g. line search failed),
+            # out of iterations or of weight updates
+            if (res.status == 99 or res.nit == 0 or nit >= maxiter
+                    or k >= b.outer):
+                break
+            new = weights(w)
+            # converged and weights settled
+            if res.success and np.max(np.abs(new/lmbd - 1.)) < 0.1:
+                break
+            lmbd = new
+        self.w = jnp.asarray(w)
+        self.lmbd = lmbd
+        res.nit, res.nfev, res.nouter = nit, nfev, k
+        res.lmbd = lmbd
+        res.terms = terms(w)
         return res
 
     @staticmethod
@@ -363,7 +411,7 @@ class spinn:
         with open(fname, 'rb') as f:
             (children, aux_data) = pickle.load(f)
         # make arrays again
-        wlst, plst = children
+        wlst, plst = children[:2]
         w = jnp.asarray(wlst)
         p = [[jnp.asarray(pij) for pij in pi] for pi in plst]
         children = (w, p)

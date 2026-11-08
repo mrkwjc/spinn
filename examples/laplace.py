@@ -28,11 +28,10 @@ class laplace(spinn):
     """
 
     @jax.jit
-    def loss(self, w, x, q, bx, lmbd):
+    def terms(self, w, x, q, bx):
         self.w = jnp.asarray(w)
 
         left, right, bottom, top = bx
-        l1, l2, l3, l4, l5 = lmbd
 
         dFxx, dFyy = self.propx([[x, 0, 0, 0],
                                  [x, 0, 1, 1]])
@@ -48,7 +47,7 @@ class laplace(spinn):
         e4 = self.mse(dFy_bottom,  0)
         e5 = self.mse(dFy_top,     0)
 
-        return l1*e1 + l2*e2 + l3*e3 + l4*e4 + l5*e5
+        return e1, e2, e3, e4, e5
 
 
 def exact(x, L, B):
@@ -64,11 +63,16 @@ if __name__ == "__main__":
     x = hcube((L, B), n=n)
     bx = left(x), right(x), bottom(x), top(x)
     q = B/2 * (1 - jnp.cos(jnp.pi * bx[1][:, 1] / B))
+    # Fixed weights of the terms: the Dirichlet conditions (left, right)
+    # are weighted up; automatic balancing (the default) leaves all weights
+    # at 1 here, because the boundary terms already pull harder than the
+    # equation residual (about 5x less accurate)
     lmbd = [1., 10., 10., 1., 1.]
 
     G = mlgraph((2, 16, 16, 1))
     PDE = laplace(G, initx=x)
-    PDE.train(x, q, bx, lmbd, tol=1e-10, maxiter=5000)
+    PDE.train(x, q, bx, tol=1e-10, maxiter=5000,
+              balance=lmbd)
 
     # Compare with theoretical solution on the training grid...
     F = PDE(x).T[0]

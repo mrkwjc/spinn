@@ -26,7 +26,7 @@ class beam(spinn):
     """
 
     @jax.jit
-    def loss(self, w, x, q, bx, EI, lmbd):
+    def terms(self, w, x, q, bx, EI):
         self.w = jnp.asarray(w)
 
         F, dFx, dFxxxx = self.propx([[bx, 0],
@@ -36,8 +36,7 @@ class beam(spinn):
         e1 = self.mse(EI*dFxxxx, q)
         e2 = self.mse(F,      0)
         e3 = self.mse(dFx,    0)
-        l1, l2, l3 = lmbd
-        return l1*e1 + l2*e2 + l3*e3
+        return e1, e2, e3
 
 
 def exact(x, q0, L, EI):
@@ -61,11 +60,10 @@ if __name__ == "__main__":
     x = hcube(L, n=401)
     q = -q0 * jnp.sin(jnp.pi*(x/L))
     bx = x[jnp.asarray([0, -1])]  # boundary
-    lmbd = [10., 1., 1.]
 
     G = mlgraph((1, 32, 1))
     B = beam(G, initx=x)
-    B.train(x, q, bx, EI, lmbd, tol=1e-8, maxiter=5000)
+    B.train(x, q, bx, EI)  # weights of the terms balanced automatically
 
     # Compare with theoretical solution
     names = ['F', 'dFx', 'dFxx', 'dFxxx', 'dFxxxx']

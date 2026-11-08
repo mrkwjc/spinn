@@ -25,11 +25,10 @@ class heat(spinn):
     """
 
     @jax.jit
-    def loss(self, w, x, a, f0, bx, lmbd):
+    def terms(self, w, x, a, f0, bx):
         self.w = jnp.asarray(w)
 
         left, right, bottom = bx
-        l1, l2, l3 = lmbd
 
         dFt, dFxx = self.propx([[x, 0, 1],
                                 [x, 0, 0, 0]])
@@ -42,7 +41,7 @@ class heat(spinn):
         e2 = self.mse(F_left, 0) + self.mse(F_right, 0)
         e3 = self.mse(F_bottom, f0)
 
-        return l1*e1 + l2*e2 + l3*e3
+        return e1, e2, e3
 
 
 def exact(x, a, L):
@@ -57,11 +56,10 @@ if __name__ == "__main__":
     x = hcube((L, T), n=n)
     bx = left(x), right(x), bottom(x)
     f0 = jnp.sin(jnp.pi*bx[2][:, 0]/L)  # initial temperature profile
-    lmbd = [1., 10., 10.]
 
     G = mlgraph((2, 16, 16, 1))
     PDE = heat(G, initx=x)
-    PDE.train(x, a, f0, bx, lmbd, tol=1e-10, maxiter=5000)
+    PDE.train(x, a, f0, bx)  # weights of the terms balanced automatically
 
     F = PDE(x).T[0]
     Fe = exact(x, a, L)
