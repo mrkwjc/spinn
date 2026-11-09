@@ -77,13 +77,14 @@ if __name__ == "__main__":
     L = 4.
     q0 = 8.
     EI = 1.     # bending stiffness
-    Fmin = 10.  # height of the tip support (try e.g. Fmin = -200, no contact)
+    Fmin = -30.  # height of the tip support (try e.g. Fmin = -200, no contact)
     x = hcube(L, n=201)
     q = -q0 * jnp.sin(jnp.pi*(x/L))
     bx = x[jnp.asarray([0, -1])]  # boundary
     # Fixed weights of the terms: automatic balancing (the default) weights
     # up the boundary terms as they get satisfied, while here the equation
-    # residual should be weighted up (about 2x more accurate)
+    # residual should be weighted up (10-100x more accurate, and the
+    # automatic weights sometimes miss the contact solution entirely)
     lmbd = [10., 1., 1., 1., 1.]
 
     G = mlgraph((1, 32, 1))
