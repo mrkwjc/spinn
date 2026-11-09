@@ -64,9 +64,9 @@ if __name__ == "__main__":
     bx = left(x), right(x), bottom(x), top(x)
     q = B/2 * (1 - jnp.cos(jnp.pi * bx[1][:, 1] / B))
     # Fixed weights of the terms: the Dirichlet conditions (left, right)
-    # are weighted up; automatic balancing (the default) leaves all weights
-    # at 1 here, because the boundary terms already pull harder than the
-    # equation residual (about 5x less accurate)
+    # are weighted up. This is about 1.5x more accurate here than the
+    # automatic balancing (the default, balance='curv'), which can be
+    # tried by removing the 'balance' argument below
     lmbd = [1., 10., 10., 1., 1.]
 
     G = mlgraph((2, 16, 16, 1))

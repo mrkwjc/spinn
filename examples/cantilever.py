@@ -81,16 +81,11 @@ if __name__ == "__main__":
     x = hcube(L, n=201)
     q = -q0 * jnp.sin(jnp.pi*(x/L))
     bx = x[jnp.asarray([0, -1])]  # boundary
-    # Fixed weights of the terms: automatic balancing (the default) weights
-    # up the boundary terms as they get satisfied, while here the equation
-    # residual should be weighted up (10-100x more accurate, and the
-    # automatic weights sometimes miss the contact solution entirely)
-    lmbd = [10., 1., 1., 1., 1.]
 
     G = mlgraph((1, 32, 1))
     B = cantilever(G, initx=x)
-    B.train(x, q, bx, EI, Fmin, tol=1e-10, maxiter=10000,
-            balance=lmbd)
+    # weights of the terms are balanced automatically (balance='curv')
+    B.train(x, q, bx, EI, Fmin, tol=1e-10, maxiter=10000)
 
     F, dFx, dFxx, dFxxx, dFxxxx = B.propx([[x, 0],
                                            [x, 0, 0],

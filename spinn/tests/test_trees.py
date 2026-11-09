@@ -80,6 +80,24 @@ class TestTrain:
         np.testing.assert_allclose(N.loss(N.w, x, t, lmbd=r.lmbd), r.fun,
                                    rtol=1e-4)
 
+    def test_balance_curv(self):
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        # curvatures v.H.v of the terms against a full Hessian
+        w = N.w
+        v = jnp.ones_like(w).at[::2].set(-1.)
+        H = jax.hessian(lambda w: N._terms(w, x, t))(w)
+        np.testing.assert_allclose(N._termsvhv(w, v[None], x, t)[0],
+                                   jnp.einsum('i,kij,j->k', v, H, v),
+                                   rtol=1e-3, atol=1e-6)
+        b = balance.curv(inner=100)
+        lm = b(N, w, x, t)
+        assert lm.shape == (2,) and lm.min() == 1 and np.all(lm >= 1)
+        r = N.train(x, t, maxiter=300, balance=b)   # 'curv' is the default
+        assert r.nit <= 300 and np.all(r.lmbd >= 1)
+        np.testing.assert_allclose(N.loss(N.w, x, t, lmbd=r.lmbd), r.fun,
+                                   rtol=1e-4)
+
     def test_equal_and_fixed_weights(self):
         x, t = data()
         N = fit2([1, 8, 1], f=jnp.tanh, key=1)
@@ -112,6 +130,7 @@ class TestTrain:
     def test_balancer_resolution(self):
         get = balance.get
         assert type(get('grad')) is balance.grad
+        assert type(get('curv')) is balance.curv
         assert type(get(balance.grad)) is balance.grad
         b = balance.grad(lmax=10.)
         assert get(b) is b and b.lmax == 10. and balance.grad.lmax == 1e6

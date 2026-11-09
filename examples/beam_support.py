@@ -99,7 +99,7 @@ if __name__ == "__main__":
 
     G = mlgraph((1, 32, 2))
     B = beam(G, initx=jnp.vstack([x1, x2]))
-    # weights of the terms are balanced automatically (balance='grad')
+    # weights of the terms are balanced automatically (balance='curv')
     B.train(x1, x2, q1, q2, bx, EI, Fmin, tol=1e-10, maxiter=10000)
 
     # Solution assembled from both parts

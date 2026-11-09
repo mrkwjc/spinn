@@ -218,6 +218,19 @@ class spinn:
         J = jax.jacrev(lambda w: self._terms(w, *args))(w)
         return jnp.sqrt(jnp.sum(J**2, axis=1))
 
+    @jax.jit
+    def _termsvhv(self, w, vs, *args):
+        """
+        Curvatures v.H.v of each loss term along the rows v of 'vs'
+        (H - Hessian of the term w.r.t. weights), exact second directional
+        derivatives without forming H; shape (len(vs), number of terms).
+        """
+        T = lambda w: self._terms(w, *args)
+
+        def vhv(v):
+            return jax.jvp(lambda u: jax.jvp(T, (u,), (v,))[1], (w,), (v,))[1]
+        return jax.vmap(vhv)(vs)
+
     # @jax.jit
     # def loss(self, w, *args):
     #     self.w = jnp.asarray(w)
@@ -244,7 +257,7 @@ class spinn:
     # We use scipy.optimize.minimize here. It has many advantages,
     # but cannot be jitted...
     def train(self, *args, tol=1e-10, maxiter=None, disp=False,
-              method='L-BFGS-B', balance='grad', **kwargs):
+              method='L-BFGS-B', balance='curv', **kwargs):
         """
         Train network with scipy.optimize.minimize ('L-BFGS-B' by default)
         on the weighted sum of 'terms':
@@ -253,13 +266,16 @@ class spinn:
 
         The weights 'lmbd' are set by the balancer 'balance' (see module
         'spinn.balance'): the optimizer runs 'inner' iterations with fixed
-        weights, then the weights are updated and this is repeated. The
-        first term is the reference (put the equation first). 'balance' is
+        weights, then the weights are updated and this is repeated. By
+        default ('curv') the terms are weighted to equal curvature, with
+        the stiffest term as the reference; 'grad' weights them to equal
+        gradient norms relative to the first term (put the equation
+        first). 'balance' is
 
             name     - balancer from spinn.balance with default options:
-                       'grad' (default)
+                       'curv' (default) or 'grad'
             class    - balancer class (default options)
-            instance - balancer with own options, e.g. grad(lmax=1e3)
+            instance - balancer with own options, e.g. curv(lmax=1e3)
             sequence - fixed weights, one per term
             None     - equal weights, i.e. plain sum of terms
 
@@ -303,6 +319,8 @@ class spinn:
             if method == 'L-BFGS-B':
                 # scipy's default maxfun=15000 would stop long runs early
                 opts.setdefault('maxfun', 10*n)
+                # and maxls=20 fails the line search on stiff losses
+                opts.setdefault('maxls', 50)
             return minimize(f64(self._loss), w,
                             (jnp.asarray(lmbd, dtype),) + args,
                             jac=f64(self._lossg), method=method, tol=tol,
@@ -316,9 +334,10 @@ class spinn:
         if len(terms(w)) < 2:
             b = balancing.fixed()  # one term, nothing to balance
         lmbd = weights(w)
-        nit = nfev = k = 0
+        nit = nfev = k = short = 0
         while True:
-            res = run(w, lmbd, int(min(b.inner, maxiter - nit)))
+            n = int(min(b.inner, maxiter - nit))
+            res = run(w, lmbd, n)
             w = res.x
             nit += res.nit
             nfev += res.nfev
@@ -329,10 +348,15 @@ class spinn:
                       % (k, res.nit,
                          np.array2string(terms(w), formatter=fmt),
                          np.array2string(lmbd, formatter=fmt)))
-            # stopped by callback, no progress (e.g. line search failed),
-            # out of iterations or of weight updates
-            if (res.status == 99 or res.nit == 0 or nit >= maxiter
-                    or k >= b.outer):
+            # (almost) no progress twice in a row: line search failed, or
+            # the weights keep changing while the optimizer has nothing left
+            # to do (once is not enough, a run with poor weights can stop
+            # early and the next weights recover)
+            short = short + 1 if res.nit < min(10, n) else 0
+            # stopped by callback, no progress, out of iterations or of
+            # weight updates
+            if (res.status == 99 or res.nit == 0 or short >= 2
+                    or nit >= maxiter or k >= b.outer):
                 break
             new = weights(w)
             # converged and weights settled

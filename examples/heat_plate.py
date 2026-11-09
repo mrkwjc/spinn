@@ -27,11 +27,11 @@ class plate(spinn):
     In physical units the loss terms differ by orders of magnitude (the
     residual is in K/m**2, the cooled edge in K, the heat flux in W/m**2),
     so with equal weights the network does not find the solution at all.
-    Automatic balancing of the terms (the default in 'train') weights the
-    boundary terms up and gives about 1% error in float32 within seconds.
-    More accuracy needs float64 (about 0.1%, but much slower) or, better,
-    nondimensional variables (e.g. x/L, y/L, (T - T0)/(q0*L/k)), which
-    bring all terms to order one.
+    Automatic balancing of the terms (the default in 'train') weights them
+    to equal curvature and gives about 0.1% error in float32 within
+    seconds (about 1% with balance='grad'). Nondimensional variables (e.g.
+    x/L, y/L, (T - T0)/(q0*L/k)) avoid the problem altogether, they bring
+    all terms to order one.
     """
 
     @jax.jit
