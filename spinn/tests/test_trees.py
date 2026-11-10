@@ -259,10 +259,11 @@ class TestTrain:
         assert calls[0] == 0 and calls[-1] == 1
         assert sorted(calls) == calls and 0 in calls
         np.testing.assert_allclose(r.lmbd, [1., 5.])
-        # hard stops do not advance
+        # hard stops (here 'outer', the number of optimizer runs) do not
+        # advance, whatever the optimizer does
         calls.clear()
-        N.train(x, t, maxiter=20, balance=two())
-        assert set(calls) == {0}
+        r = N.train(x, t, maxiter=2000, balance=two(outer=1))
+        assert set(calls) == {0} and r.nouter == 1
 
     def test_equal_and_fixed_weights(self):
         x, t = data()
