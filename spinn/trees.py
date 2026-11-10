@@ -1,3 +1,5 @@
+import copy
+import warnings
 import networkx as nx
 import numpy as np
 import jax
@@ -16,7 +18,6 @@ jax.config.update('jax_default_matmul_precision', 'high')  # 'bfloat16_3x'
 
 
 class spinn:
-    lmbd = None  # weights of the loss terms after 'train'
 
     def __init__(self, G, f=None, p=None,
                  initx=None, inity=None,
@@ -181,7 +182,9 @@ class spinn:
         return (self.mse(self(x), t),)
 
     def _terms(self, w, *args):
-        T = self.terms(w, *args)
+        # 'loss' is the old name of 'terms' (deprecated)
+        old = hasattr(self, 'loss') and type(self).terms is spinn.terms
+        T = (self.loss if old else self.terms)(w, *args)
         if isinstance(T, (list, tuple)):
             return jnp.concatenate([jnp.ravel(jnp.asarray(t)) for t in T])
         return jnp.ravel(jnp.asarray(T))
@@ -195,41 +198,6 @@ class spinn:
     @partial(jax.grad, argnums=1)
     def _lossg(self, w, lmbd, *args):
         return self._loss(w, lmbd, *args)
-
-    def loss(self, w, *args, lmbd=None):
-        """Loss: sum of 'terms', weighted by 'lmbd' if given."""
-        T = self._terms(w, *args)
-        return jnp.sum(T) if lmbd is None else jnp.sum(jnp.asarray(lmbd)*T)
-
-    @jax.jit
-    @partial(jax.grad, argnums=1)
-    def lossg(self, w, *args):
-        """Gradient of the (unweighted) loss."""
-        return jnp.sum(self._terms(w, *args))
-
-    @jax.jit
-    @partial(jax.value_and_grad, argnums=1)
-    def lossvg(self, w, *args):
-        return jnp.sum(self._terms(w, *args))
-
-    @jax.jit
-    def _termsgn(self, w, *args):
-        """Norms of the gradients of each loss term (w.r.t. weights)."""
-        J = jax.jacrev(lambda w: self._terms(w, *args))(w)
-        return jnp.sqrt(jnp.sum(J**2, axis=1))
-
-    @jax.jit
-    def _termsvhv(self, w, vs, *args):
-        """
-        Curvatures v.H.v of each loss term along the rows v of 'vs'
-        (H - Hessian of the term w.r.t. weights), exact second directional
-        derivatives without forming H; shape (len(vs), number of terms).
-        """
-        T = lambda w: self._terms(w, *args)
-
-        def vhv(v):
-            return jax.jvp(lambda u: jax.jvp(T, (u,), (v,))[1], (w,), (v,))[1]
-        return jax.vmap(vhv)(vs)
 
     # @jax.jit
     # def loss(self, w, *args):
@@ -273,7 +241,10 @@ class spinn:
         first). 'balance' is
 
             name     - balancer from spinn.balance with default options:
-                       'curv' (default) or 'grad'
+                       'curv' (default), 'grad', 'sens', or an expression
+                       of them, e.g. 'curv, curv**.5*sens' (curv, then
+                       corrected by sensitivities; shortcut 'curvsens',
+                       see spinn.balance)
             class    - balancer class (default options)
             instance - balancer with own options, e.g. curv(lmax=1e3)
             sequence - fixed weights, one per term
@@ -289,20 +260,25 @@ class spinn:
         'maxiter' limits the total number of optimizer iterations (default
         15000). Other keyword arguments (e.g. 'options', 'callback') are
         passed to scipy.optimize.minimize. The weights are returned in
-        'res.lmbd' (and kept in 'self.lmbd'), the unweighted terms in
+        'res.lmbd', the unweighted terms in
         'res.terms'; 'res.fun' is the weighted loss, 'res.nouter' the
         number of optimizer runs.
         """
-        if type(self).loss is not spinn.loss:
-            raise AttributeError("'loss' cannot be overridden any more, "
-                                 "rename it to 'terms'")
+        if hasattr(self, 'loss'):
+            if type(self).terms is spinn.terms:
+                warnings.warn("'loss' is deprecated and will be removed, "
+                              "rename it to 'terms'", FutureWarning,
+                              stacklevel=2)
+            else:
+                warnings.warn("'loss' is ignored, 'terms' is minimized",
+                              FutureWarning, stacklevel=2)
         if hasattr(self, 'eqc') or hasattr(self, 'ineqc'):
             raise AttributeError("'eqc' and 'ineqc' are not supported any "
                                  "more, return the constraints as 'terms' "
                                  "after the equation")
         options = dict(kwargs.pop('options', None) or {})
         callback = kwargs.pop('callback', None)
-        b = balancing.get(balance)
+        b = copy.deepcopy(balancing.get(balance))  # state of this training
         if maxiter is None:
             maxiter = 15000  # scipy's default for L-BFGS-B
 
@@ -326,14 +302,14 @@ class spinn:
                             jac=f64(self._lossg), method=method, tol=tol,
                             options=opts, callback=callback, **kwargs)
 
-        def weights(w):
-            return np.asarray(b(self, w, *args), np.float64)
+        def weights(w, current):  # current - weights in the loss so far
+            return np.asarray(b(self, w, current, *args), np.float64)
 
         w = np.asarray(self.w, dtype=np.float64)
         dtype = jnp.asarray(self.w).dtype
         if len(terms(w)) < 2:
             b = balancing.fixed()  # one term, nothing to balance
-        lmbd = weights(w)
+        lmbd = weights(w, None)
         nit = nfev = k = short = 0
         while True:
             n = int(min(b.inner, maxiter - nit))
@@ -353,18 +329,22 @@ class spinn:
             # to do (once is not enough, a run with poor weights can stop
             # early and the next weights recover)
             short = short + 1 if res.nit < min(10, n) else 0
-            # stopped by callback, no progress, out of iterations or of
-            # weight updates
-            if (res.status == 99 or res.nit == 0 or short >= 2
-                    or nit >= maxiter or k >= b.outer):
+            # stopped by callback, out of iterations or of weight updates
+            if res.status == 99 or nit >= maxiter or k >= b.outer:
                 break
-            new = weights(w)
-            # converged and weights settled
-            if res.success and np.max(np.abs(new/lmbd - 1.)) < 0.1:
-                break
+            # no progress
+            done = res.nit == 0 or short >= 2
+            if not done:
+                new = weights(w, lmbd)
+                # converged and weights settled
+                done = res.success and np.max(np.abs(new/lmbd - 1.)) < 0.1
+            if done:
+                if not b.advance():  # next phase of the balancer, if any
+                    break
+                short = 0
+                new = weights(w, lmbd)
             lmbd = new
         self.w = jnp.asarray(w)
-        self.lmbd = lmbd
         res.nit, res.nfev, res.nouter = nit, nfev, k
         res.lmbd = lmbd
         res.terms = terms(w)

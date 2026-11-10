@@ -46,8 +46,10 @@ class beam(spinn):
     """
 
     @jax.jit
-    def terms(self, w, x1, x2, q1, q2, bx, EI, Fmin):
+    def terms(self, w, x, q, bx, EI, Fmin):
         self.w = jnp.asarray(w)
+        x1, x2 = x      # domain of each part (output)
+        q1, q2 = q
 
         dF1xxxx, dF2xxxx = self.propx([[x1, 0, 0, 0, 0, 0],
                                        [x2, 1, 0, 0, 0, 0]])
@@ -100,7 +102,7 @@ if __name__ == "__main__":
     G = mlgraph((1, 32, 2))
     B = beam(G, initx=jnp.vstack([x1, x2]))
     # weights of the terms are balanced automatically (balance='curv')
-    B.train(x1, x2, q1, q2, bx, EI, Fmin, tol=1e-10, maxiter=10000)
+    B.train((x1, x2), (q1, q2), bx, EI, Fmin, tol=1e-10, maxiter=10000)
 
     # Solution assembled from both parts
     x = jnp.vstack([x1, x2[1:]])
