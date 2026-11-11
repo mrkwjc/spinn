@@ -1,4 +1,6 @@
+import importlib
 import itertools
+import jax
 import jax.numpy as jnp
 
 
@@ -49,6 +51,45 @@ def from01c(x):
     return ax, bx
 
 
+def actname(f):
+    """
+    Name stored for the activation 'f': a string is kept, a function from
+    jax.nn or jax.numpy gets its name there ('tanh', 'gelu'), a module-level
+    function its dotted path ('myacts.swish2'). Lambdas and local functions
+    are kept as they are (usable, but not savable).
+    """
+    if isinstance(f, str):
+        actfunc(f)                      # unknown names fail here, early
+        return f
+    name = getattr(f, '__name__', '')
+    for mod in (jax.nn, jax.numpy):
+        if getattr(mod, name, None) is f:
+            return name
+    qual = getattr(f, '__qualname__', '')
+    if qual and '<' not in qual:        # not '<lambda>', not '<locals>'
+        return '%s.%s' % (f.__module__, qual)
+    return f
+
+
+def actfunc(f):
+    """Function for the activation 'f' (name or function)."""
+    if callable(f):
+        return f
+    if f == 'identity':
+        return lambda x: x
+    if f == 'linear':
+        return lambda x, a=1., b=0.: a*x + b
+    for mod in (jax.nn, jax.numpy):
+        g = getattr(mod, f, None)
+        if callable(g):
+            return g
+    if '.' in f:
+        module, name = f.rsplit('.', 1)
+        return getattr(importlib.import_module(module), name)
+    raise ValueError("unknown activation '%s' (use a name from jax.nn or "
+                     "jax.numpy, or 'module.function')" % f)
+
+
 def unroll_fp(f, p, arch):
     nl = len(arch)
     if f is None:
@@ -64,6 +105,7 @@ def unroll_fp(f, p, arch):
             raise ValueError(f"{len(f)} funcs given for {len(arch)} layers.")
     else:
         raise ValueError("'f' have to be None, str, callable or a list.")
+    f = [actname(fi) for fi in f]
     if p is None:
         p = [()]*nl
     elif isinstance(p, tuple):

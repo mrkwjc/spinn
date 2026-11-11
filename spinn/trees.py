@@ -15,6 +15,33 @@ from spinn import balance as balancing
 
 
 class spinn:
+    """
+    Neural network for physics informed training. Subclass it, define
+    'terms' (the loss terms of the problem) and call 'train'.
+
+    G       - network: an architecture, e.g. (2, 16, 16, 1) (fully connected
+              layers), or any directed acyclic graph (networkx, see
+              spinn.mlgraph); layers are its topological generations
+    f       - activations: one for all hidden layers, a list of 3 (input,
+              hidden, output) or one per layer. Default: softplus in the
+              hidden layers, identity in the input and output. Each is a
+              name from jax.nn or jax.numpy ('tanh', 'sin', 'gelu', ...), a
+              function (stored by its name: jnp.tanh as 'tanh', own
+              functions as 'module.function'), or a lambda (works, but the
+              network cannot be saved by 'dump')
+    p       - parameters of the activations, passed as f(x, *p): one tuple
+              for the hidden layers, a list of 3 or one per layer, e.g.
+              f='elu', p=(0.5,)
+    initx   - points of the domain: inputs are scaled from their range to
+              [0, 1] (see 'initx')
+    inity   - expected outputs: outputs are scaled from [0, 1] to their
+              range (see 'inity')
+    key     - seed of the initial weights (int; None - random)
+    sparse  - sparse weight matrices (for sparsely connected graphs)
+
+    The weights are one flat vector 'w'; 'ni' and 'no' are the numbers of
+    inputs and outputs.
+    """
 
     def __init__(self, G, f=None, p=None,
                  initx=None, inity=None,
@@ -59,6 +86,8 @@ class spinn:
         self._register_pytree()
 
     def initw(self, key=None):
+        """New random weights (uniform, scaled by the number of inputs of
+        each neuron), seeded by 'key' (None - random)."""
         w = []
         b = []
         for s, (i0, i1), _, _ in self.wshp:
@@ -75,6 +104,8 @@ class spinn:
         return w
 
     def initx(self, x):
+        """Scale the inputs from the range of the points 'x' to [0, 1]
+        (linear input layer)."""
         x = jnp.atleast_2d(x)
         assert x.shape[1] == self.ni
         ax, bx = utils.to01c(x)
@@ -83,6 +114,8 @@ class spinn:
         return ax, bx
 
     def inity(self, y):
+        """Scale the outputs from [0, 1] to the range of 'y' (linear output
+        layer)."""
         y = jnp.atleast_2d(y)
         assert y.shape[1] == self.no
         ay, by = utils.from01c(y)
@@ -91,23 +124,7 @@ class spinn:
         return ay, by
 
     def afunc(self, xi, i):
-        f = self.f[i]
-        p = self.p[i]
-        match f:
-            case 'identity':
-                return xi
-            case 'linear':
-                return self.linear(xi, *p)
-            case 'relu':
-                return jax.nn.relu(xi, *p)
-            case 'sigmoid':
-                return jax.nn.sigmoid(xi, *p)
-            case 'softplus':
-                return jax.nn.softplus(xi, *p)
-            case 'sin':
-                return jax.numpy.sin(xi, *p)
-            case _:
-                return f(xi, *p)
+        return utils.actfunc(self.f[i])(xi, *self.p[i])
 
     def _prop(self, x):
         y = self.afunc(x, 0)
@@ -128,6 +145,12 @@ class spinn:
     @jax.jit
     @partial(jax.vmap, in_axes=(None, 0, None))
     def propd(self, x, spec):
+        """
+        Outputs and their derivatives at the points 'x': 'spec' is a list
+        of [k, i, j, ...], output k (index or list of indices)
+        differentiated with respect to inputs i, j, ... Returns an array of
+        shape (len(x), number of values).
+        """
         f = self._prop
 
         def deriv(f, x, v):
@@ -151,11 +174,18 @@ class spinn:
 
     @jax.jit
     def propx(self, xspec):
+        """
+        Outputs and derivatives at different point sets: 'xspec' is a list
+        of [x, k, i, j, ...], output k at the points x differentiated with
+        respect to inputs i, j, ..., e.g. [[x, 0, 0, 0], [bx, 0]] gives
+        d2F/dx0^2 at x and F at bx. Returns a tuple of flat arrays.
+        """
         return tuple(self.propd(a[0], [a[1:]]).ravel() for a in xspec)
 
     @jax.jit
     @partial(jax.vmap, in_axes=(None, 0))
     def __call__(self, x):
+        """Outputs at the points 'x', shape (len(x), no)."""
         return self._prop(x)
 
     @jax.jit
@@ -365,11 +395,22 @@ class spinn:
                                                cls._tree_unflatten)
 
     def dump(self, fname):
+        """
+        Save the network (weights, activations and their parameters) to the
+        file 'fname' as plain lists and names, readable by 'load'.
+        Activations given as lambdas or local functions cannot be saved.
+        """
+        for i, fi in enumerate(self.f):
+            if not isinstance(fi, str):
+                raise ValueError(
+                    "activation of layer %d is a lambda or local function and "
+                    "cannot be saved; define it in a module or use a name "
+                    "from jax.nn / jax.numpy" % i)
         (children, aux_data) = self._tree_flatten()
         # pickle lists
         w, p = children
         wlst = w.tolist()
-        plst = [[pij.tolist() for pij in pi] for pi in p]
+        plst = [[np.asarray(pij).tolist() for pij in pi] for pi in p]
         children = (wlst, plst)
         #
         with open(fname, 'wb') as f:
@@ -377,6 +418,11 @@ class spinn:
 
     @classmethod
     def load(cls, fname):
+        """
+        Network saved by 'dump' (as an instance of this class, e.g.
+        heat.load(fname)). Activations given as 'module.function' need the
+        module to be importable.
+        """
         with open(fname, 'rb') as f:
             (children, aux_data) = pickle.load(f)
         # make arrays again

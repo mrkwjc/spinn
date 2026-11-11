@@ -44,4 +44,9 @@ weights are balanced automatically (`balance='curv'` by default, see
 explicitly as `balance=[1., 10., 10.]`. The final weights are returned in
 `res.lmbd` and the unweighted terms in `res.terms`.
 
+Activations of the hidden layers are set with `f`: a name from `jax.nn` or
+`jax.numpy` (`f='tanh'`, `f='sin'`, `f='gelu'`; softplus by default), a
+function, or one per layer. Networks are saved with `P.dump(fname)` and
+restored with `heat.load(fname)`; see `help(spinn)` for details.
+
 More problems (beams, Laplace and heat equations) are in `examples/`.

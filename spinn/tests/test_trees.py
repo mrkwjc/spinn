@@ -434,7 +434,7 @@ class TestTrain:
     def test_pickle_after_train(self, tmp_path):
         import pickle
         x, t = data()
-        N = fit2([1, 8, 1], key=1)    # (jnp.tanh cannot be pickled)
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
         N.train(x, t, maxiter=5, balance=[1., 2.])
         M = pickle.loads(pickle.dumps(N))
         np.testing.assert_allclose(M(x), N(x))
@@ -442,6 +442,45 @@ class TestTrain:
         N.dump(fname)
         M = fit2.load(fname)
         np.testing.assert_allclose(M(x), N(x))
+
+
+def swish(x):       # module-level activation, saved by its dotted path
+    return x*jax.nn.sigmoid(x)
+
+
+class TestActivations:
+    def test_names(self):
+        x, _ = data()
+        assert spinn([1, 8, 1]).f == ['identity', 'softplus', 'identity']
+        assert spinn([1, 8, 1], f=jnp.tanh).f[1] == 'tanh'
+        assert spinn([1, 8, 1], f=jax.nn.gelu).f[1] == 'gelu'
+        assert spinn([1, 8, 1], f=swish).f[1] == swish.__module__ + '.swish'
+        N = spinn([1, 8, 1], f=['identity', 'sin', 'identity'], initx=x, key=1)
+        assert N.f == ['linear', 'sin', 'identity']
+        # names give the same network as the functions
+        M = spinn([1, 8, 1], f=jnp.sin, initx=x, key=1)
+        np.testing.assert_allclose(M(x), N(x))
+        import pytest
+        with pytest.raises(ValueError, match='unknown activation'):
+            spinn([1, 8, 1], f='nosuchfunction')
+
+    def test_dump_load(self, tmp_path):
+        x, _ = data()
+        fname = str(tmp_path/'n.pkl')
+        for f, p in (('gelu', None), ('elu', (0.5,)), (swish, None)):
+            N = spinn([1, 8, 1], f=f, p=p, initx=x, key=1)
+            N.dump(fname)
+            M = spinn.load(fname)
+            assert M.f == N.f
+            np.testing.assert_allclose(M(x), N(x))
+
+    def test_lambda(self, tmp_path):
+        import pytest
+        x, _ = data()
+        N = spinn([1, 8, 1], f=lambda x: jnp.sin(3*x), initx=x, key=1)
+        np.testing.assert_allclose(N(x)[:, 0], N(x)[:, 0])   # works
+        with pytest.raises(ValueError, match='layer 1 is a lambda'):
+            N.dump(str(tmp_path/'n.pkl'))
 
 
 if __name__ == "__main__":
