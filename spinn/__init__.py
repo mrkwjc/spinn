@@ -1,4 +1,5 @@
 import jax
+# jax.config.update('jax_platforms', 'cpu')  # run on CPU
 jax.config.update('jax_default_matmul_precision', 'high')  # 'bfloat16_3x'
 
 from .trees import spinn

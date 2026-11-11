@@ -1,4 +1,5 @@
 import copy
+import pickle
 import warnings
 import networkx as nx
 import numpy as np
@@ -9,12 +10,6 @@ from scipy.optimize import minimize
 from jax.experimental.sparse import BCOO
 from spinn import utils, graphs
 from spinn import balance as balancing
-import pickle
-
-# import os
-# os.environ['CUDA_VISIBLE_DEVICES'] = ''
-# jax.config.update("jax_enable_x64", True)
-jax.config.update('jax_default_matmul_precision', 'high')  # 'bfloat16_3x'
 
 
 class spinn:
@@ -59,8 +54,6 @@ class spinn:
             self.initx(initx)
         if inity is not None:
             self.inity(inity)
-        # self.codes = {None: [[i] for i in range(self.ni)],
-        #               'F': [[0]], 'dFx': [[0, 0]]}
         self._register_pytree()
 
     def initw(self, key=None):
@@ -163,11 +156,6 @@ class spinn:
     def __call__(self, x):
         return self._prop(x)
 
-    # @jax.jit
-    # def __call__(self, x, spec=None):
-    #     spec = self.codes.get(spec, spec)
-    #     return self._propd(x, spec)
-
     @jax.jit
     def terms(self, w, x, t):
         """
@@ -199,31 +187,6 @@ class spinn:
     def _lossg(self, w, lmbd, *args):
         return self._loss(w, lmbd, *args)
 
-    # @jax.jit
-    # def loss(self, w, *args):
-    #     self.w = jnp.asarray(w)
-    #     y = self.eqs(w, *args)
-    #     return sum(mse(yi) for yi in y)
-
-    # This is concrete represntation of eqs
-    # @jax.jit
-    # def eqs(self, w, x, t):
-    #     self.w = jnp.asarray(w)
-    #     return [self(x) - t]
-
-    # Unfortunately jax's BFGS most of the time fails because of 3 - zoom error
-    # def train(self, *args, maxiter=None, tol=None, method='BFGS', **kwargs):
-    #     from jax.scipy.optimize import minimize
-    #     res = minimize(self.loss, self.w, args,
-    #                    tol=tol,
-    #                    options={'maxiter': maxiter},
-    #                    method=method,
-    #                    **kwargs)
-    #     self.w = jnp.asarray(res.x)
-    #     return res
-
-    # We use scipy.optimize.minimize here. It has many advantages,
-    # but cannot be jitted...
     def train(self, *args, tol=1e-10, maxiter=None, disp=False,
               method='L-BFGS-B', balance='curv', **kwargs):
         """

@@ -1,9 +1,45 @@
+import functools
+import itertools
+import random
 import jax
 import jax.numpy as jnp
 import numpy as np
 from spinn import utils, graphs, spinn, balance
 
-# jax.config.update('jax_default_matmul_precision', 'high')  # 'bfloat16_3x'
+
+# Reference layered network, independent of spinn
+
+def uniform(low=0., high=1., shape=(), key=None):
+    shape = (shape,) if isinstance(shape, int) else shape
+    key = random.randint(0, 10000000000) if key is None else key
+    key = jax.random.PRNGKey(key) if isinstance(key, int) else key
+    return jax.random.uniform(key, shape=shape, minval=low, maxval=high)
+
+
+def randomweights(arch, key=None):
+    W = []
+    wshp = list(itertools.pairwise(arch))
+    bshp = arch[1:]
+    for i, n in enumerate(arch[:-1]):
+        bound = 2.38/jnp.sqrt(n+1)
+        w = uniform(-bound, bound, shape=wshp[i])
+        b = uniform(-bound, bound, shape=bshp[i])
+        W += [[w, b]]
+    return W
+
+
+@jax.jit
+@functools.partial(jax.vmap, in_axes=(None, 0, None))
+def simpleprop(w, x, c):
+    ax, bx, ay, by = c
+    y = ax*x + bx
+    for wi, bi in w[:-1]:
+        yi = y.dot(wi) + bi
+        y = jax.nn.softplus(yi)
+    wi, bi = w[-1]
+    y = y.dot(wi) + bi
+    y = ay*y + by
+    return y
 
 
 class TestSpinn:
@@ -16,7 +52,7 @@ class TestSpinn:
         N = spinn(G, initx=x, inity=t)
 
         # Apply same weights
-        w = utils.randomweights(arch)
+        w = randomweights(arch)
         ww = [(wi[0].T.ravel(), wi[1]) for wi in w]
         wl, bl = list(zip(*ww))
         ww = jnp.concatenate(wl + bl)
@@ -24,11 +60,22 @@ class TestSpinn:
 
         c = utils.to01c(x) + utils.from01c(t)
         y1 = np.array(N(x))
-        y2 = np.array(utils.simpleprop(w, x, c))
+        y2 = np.array(simpleprop(w, x, c))
         print(y1-y2)
         print(y2[0])
 
         np.testing.assert_almost_equal(y1, y2, 5)
+
+    def test_hcube_order(self):
+        # 'ij' order: the last coordinate varies fastest, so
+        # x.reshape(n1, n2, n3, 3)[i, j, k] is the point (x_i, y_j, z_k)
+        x = utils.hcube((1., 2., 3.), n=(2, 3, 4), origin=(0., 1., 2.))
+        assert x.shape == (24, 3)
+        g = np.asarray(x).reshape(2, 3, 4, 3)
+        np.testing.assert_allclose(g[1, 2, 3], [1., 3., 5.])
+        np.testing.assert_allclose(g[0, 1, 2], [0., 2., 4.])
+        np.testing.assert_allclose(x[:3], [[0., 1., 2.], [0., 1., 3.],
+                                           [0., 1., 4.]])
 
 
 class fit2(spinn):

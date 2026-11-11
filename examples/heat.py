@@ -82,10 +82,10 @@ if __name__ == "__main__":
     ax.view_init(30, 225)
 
     ax = fig.add_subplot(122)
-    for i in range(0, n, 5):  # temperature profiles at selected times
-        ti = Tm[i, 0]
-        line, = ax.plot(X[i], F.reshape(n, n)[i], label=f't={ti:.2f}')
-        ax.plot(X[i], Fe.reshape(n, n)[i], 'o', color=line.get_color(),
+    for j in range(0, n, 5):  # temperature profiles at selected times
+        tj = Tm[0, j]
+        line, = ax.plot(X[:, j], F.reshape(n, n)[:, j], label=f't={tj:.2f}')
+        ax.plot(X[:, j], Fe.reshape(n, n)[:, j], 'o', color=line.get_color(),
                 markersize=3)
     ax.set_xlabel('x')
     ax.set_ylabel('F')

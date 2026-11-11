@@ -1,7 +1,4 @@
 import itertools
-import functools
-import random
-import jax
 import jax.numpy as jnp
 
 
@@ -83,25 +80,6 @@ def unroll_fp(f, p, arch):
     return f, p
 
 
-def meshgrid(*arrs):
-    arrs = tuple(reversed(arrs))
-    lens = tuple(map(len, arrs))
-    dim = len(arrs)
-    sz = 1
-    for s in lens:
-        sz *= s
-    ans = []
-    for i, arr in enumerate(arrs):
-        slc = [1]*dim
-        slc[i] = lens[i]
-        arr2 = jnp.asarray(arr).reshape(slc)
-        for j, sz in enumerate(lens):
-            if j != i:
-                arr2 = arr2.repeat(sz, axis=j)
-        ans.append(arr2)
-    return tuple(ans[::-1])
-
-
 def hcube(dims, n=11, origin=None):
     dims = (1.,)*dims if isinstance(dims, int) else dims
     dims = (dims,) if isinstance(dims, float) else dims
@@ -109,7 +87,7 @@ def hcube(dims, n=11, origin=None):
     n = (n,)*d if isinstance(n, int) else n
     origin = (0,)*d if origin is None else origin
     xyz = [jnp.linspace(origin[i], dims[i]+origin[i], n[i]) for i in range(d)]
-    XYZ = meshgrid(*xyz)
+    XYZ = jnp.meshgrid(*xyz, indexing='ij')
     return jnp.vstack(tuple(map(jnp.ravel, XYZ))).T
 
 
@@ -131,36 +109,3 @@ def bottom(pts):
 def top(pts):
     x = pts[:, 1]
     return pts[jnp.isclose(x, max(x))]
-
-
-def uniform(low=0., high=1., shape=(), key=None):
-    shape = (shape,) if isinstance(shape, int) else shape
-    key = random.randint(0, 10000000000) if key is None else key
-    key = jax.random.PRNGKey(key) if isinstance(key, int) else key
-    return jax.random.uniform(key, shape=shape, minval=low, maxval=high)
-
-
-def randomweights(arch, key=None):
-    W = []
-    wshp = list(itertools.pairwise(arch))
-    bshp = arch[1:]
-    for i, n in enumerate(arch[:-1]):
-        bound = 2.38/jnp.sqrt(n+1)
-        w = uniform(-bound, bound, shape=wshp[i])
-        b = uniform(-bound, bound, shape=bshp[i])
-        W += [[w, b]]
-    return W
-
-
-@jax.jit
-@functools.partial(jax.vmap, in_axes=(None, 0, None))
-def simpleprop(w, x, c):
-    ax, bx, ay, by = c
-    y = ax*x + bx
-    for wi, bi in w[:-1]:
-        yi = y.dot(wi) + bi
-        y = jax.nn.softplus(yi)
-    wi, bi = w[-1]
-    y = y.dot(wi) + bi
-    y = ay*y + by
-    return y

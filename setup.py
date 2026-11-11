@@ -14,12 +14,12 @@ setuptools.setup(
     url="https://github.com/mrkwjc/spinn",
     packages=setuptools.find_packages(),
     keywords=['ann', 'pinn'],
-    license='LGPL-2.1',
+    license='MIT',
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    python_requires='>=3.6',
+    python_requires='>=3.10',
     install_requires=['jax', 'jaxlib', 'numpy', 'scipy', 'networkx'],
 )
