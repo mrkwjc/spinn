@@ -59,13 +59,6 @@ import jax.numpy as jnp
 # pytree argument)
 
 @jax.jit
-def _termsgn(model, w, *args):
-    """Norms of the gradients of each loss term (w.r.t. weights)."""
-    J = jax.jacrev(lambda w: model._terms(w, *args))(w)
-    return jnp.sqrt(jnp.sum(J**2, axis=1))
-
-
-@jax.jit
 def _termsvhv(model, w, vs, *args):
     """
     Curvatures v.H.v of each loss term along the rows v of 'vs' (H -
@@ -126,6 +119,25 @@ def _soljvp(model, w, x, vs):
                                       (w,), (v,))[1])(vs)
 
 
+def _like(model, a):
+    """'a' as a jax array of the dtype of the network weights."""
+    return jnp.asarray(a, jnp.asarray(model.w).dtype)
+
+
+def _ratios(v, r, zero, lmax):
+    """
+    Weights v[r]/v[i] from term measures 'v' with term r as the reference
+    (weight 1); terms with v[i] = 0 get 'zero'. Weights are kept between
+    1 and 'lmax'.
+    """
+    v = np.asarray(v, np.float64)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        lm = np.where(v > 0, v[r]/v, zero)
+    lm = np.clip(np.nan_to_num(lm, nan=1.), 1., lmax)
+    lm[r] = 1.
+    return lm
+
+
 class balancer:
     """
     Base class of balancers. Options:
@@ -169,12 +181,7 @@ def onesided(v, lmax):
     before contact): its tiny measure gives it a huge weight and the other
     terms are neglected.
     """
-    v = np.asarray(v, np.float64)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        lm = np.where(v > 0, v[0]/v, lmax)
-    lm = np.clip(np.nan_to_num(lm, nan=1.), 1., lmax)
-    lm[0] = 1.
-    return lm
+    return _ratios(v, 0, lmax, lmax)
 
 
 class grad(balancer):
@@ -187,7 +194,9 @@ class grad(balancer):
     lmax = 1e6
 
     def __call__(self, model, w, lmbd, *args):
-        return onesided(_termsgn(model, w, *args), self.lmax)
+        G = _termsjac(model, _like(model, w), *args)
+        return onesided(np.linalg.norm(np.asarray(G, np.float64), axis=1),
+                        self.lmax)
 
 
 class curv(balancer):
@@ -211,18 +220,11 @@ class curv(balancer):
     seed = 0
 
     def __call__(self, model, w, lmbd, *args):
-        w = np.asarray(w)
         rng = np.random.default_rng(self.seed)
-        vs = rng.choice([-1., 1.], size=(self.probes, w.size))
-        dtype = np.asarray(model.w).dtype
-        h = _termsvhv(model, w.astype(dtype), vs.astype(dtype), *args)
+        vs = rng.choice([-1., 1.], size=(self.probes, np.size(w)))
+        h = _termsvhv(model, _like(model, w), _like(model, vs), *args)
         h = np.abs(np.mean(np.asarray(h, np.float64), axis=0))
-        r = int(np.argmax(h))
-        with np.errstate(divide='ignore', invalid='ignore'):
-            lm = np.where(h > 0, h[r]/h, 1.)
-        lm = np.clip(np.nan_to_num(lm, nan=1.), 1., self.lmax)
-        lm[r] = 1.
-        return lm
+        return _ratios(h, int(np.argmax(h)), 1., self.lmax)
 
 
 def cg(hv, B, maxcg=50, tol=1e-6):
@@ -299,15 +301,14 @@ class sens(balancer):
     _lf = None
 
     def __call__(self, model, w, lmbd, *args):
-        dtype = np.asarray(model.w).dtype
-        wj = jnp.asarray(w, dtype)
+        wj = _like(model, w)
         T = np.asarray(model._terms(wj, *args), np.float64)
         lm = np.ones(len(T)) if lmbd is None else np.asarray(lmbd, np.float64)
-        lmj = jnp.asarray(lm, dtype)
+        lmj = _like(model, lm)
         G = np.asarray(_termsjac(model, wj, *args), np.float64)
 
         def hv(V):
-            V = jnp.asarray(V, dtype)
+            V = _like(model, V)
             return np.asarray(_losshv(model, wj, lmj, V, *args), np.float64)
         # largest eigenvalue of H (power iterations) sets the damping
         v = np.random.default_rng(self.seed).standard_normal((1, wj.size))
@@ -321,8 +322,7 @@ class sens(balancer):
         mu = self.damp*hmax
         dW = cg(lambda V: hv(V) + mu*V, -lm[:, None]*G, self.maxcg)
         x = args[0]
-        du = np.asarray(_soljvp(model, wj, x, jnp.asarray(dW, dtype)),
-                        np.float64)
+        du = np.asarray(_soljvp(model, wj, x, _like(model, dW)), np.float64)
         if self.scale == 'rms':
             fid = _solfields(model, x)
             y = np.asarray(_sol(model, wj, x), np.float64)
