@@ -1,14 +1,16 @@
 import copy
 import pickle
 import warnings
-import networkx as nx
-import numpy as np
+from functools import partial
+
 import jax
 import jax.numpy as jnp
-from functools import partial
-from scipy.optimize import minimize
+import networkx as nx
+import numpy as np
 from jax.experimental.sparse import BCOO
-from spinn import utils, graphs
+from scipy.optimize import minimize
+
+from spinn import graphs, utils
 from spinn import balance as balancing
 
 
@@ -136,7 +138,7 @@ class spinn:
 
         df = []
         dy = []
-        for i, a, in enumerate(spec):
+        for i, a in enumerate(spec):
             df += [[f]]
             for j, n in enumerate(a[1:]):
                 def dfij(x, i=i, j=j, n=n):
