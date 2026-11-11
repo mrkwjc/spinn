@@ -88,15 +88,13 @@ class spinn:
     def initw(self, key=None):
         """New random weights (uniform, scaled by the number of inputs of
         each neuron), seeded by 'key' (None - random)."""
+        rng = np.random.default_rng(key)    # one generator for all layers
         w = []
         b = []
         for s, (i0, i1), _, _ in self.wshp:
-            u, c = np.unique(i0, return_counts=True)
+            c = np.unique(i0, return_counts=True)[1]
             n = np.repeat(c, c)
-            state = np.random.get_state()
-            np.random.seed(key)
-            r = np.random.uniform(-1., 1., size=len(i0)+s[0])
-            np.random.set_state(state)
+            r = rng.uniform(-1., 1., size=len(i0)+s[0])
             w += [jnp.asarray(2.38*r[:len(i0)]/np.sqrt(n+1))]
             b += [jnp.asarray(2.38*r[len(i0):]/np.sqrt(c+1))]
         w = jnp.concatenate(w + b)
