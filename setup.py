@@ -1,11 +1,15 @@
+import re
 import setuptools
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
+with open("spinn/__init__.py") as fh:
+    version = re.search(r"__version__ = '(.+)'", fh.read()).group(1)
+
 setuptools.setup(
     name="spinn",
-    version="0.2.0",
+    version=version,
     author="Marek Wojciechowski",
     author_email="mwojc@p.lodz.pl",
     description="Simple Physics Informed Neural Networks",
