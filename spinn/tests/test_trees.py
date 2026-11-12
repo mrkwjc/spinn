@@ -4,7 +4,8 @@ import random
 import jax
 import jax.numpy as jnp
 import numpy as np
-from spinn import utils, graphs, spinn, balance
+import pytest
+from spinn import utils, graphs, spinn, balance, optimize
 
 
 # Reference layered network, independent of spinn
@@ -444,6 +445,71 @@ class TestTrain:
         np.testing.assert_allclose(M(x), N(x))
 
 
+class gd(optimize.optimizer):
+    """Plain gradient descent, own optimizer for the tests."""
+    step = 0.05
+
+    def __call__(self, loss, grad, w, n, callback=None):
+        for i in range(n):
+            w = w - self.step*grad(w)
+        return optimize.OptimizeResult(x=w, fun=float(loss(w)), nit=n,
+                                       nfev=n, status=1, success=False)
+
+
+class TestOptimize:
+    def test_resolution(self):
+        o = optimize.get('BFGS')
+        assert isinstance(o, optimize.minimize) and o.method == 'BFGS'
+        assert optimize.get(optimize.minimize).method == 'L-BFGS-B'
+        o = optimize.minimize(tol=1e-6)
+        assert optimize.get(o) is o
+        with pytest.raises(TypeError):
+            optimize.minimize(lr=1.)
+        with pytest.raises(TypeError):
+            optimize.get(len)
+
+    def test_name_and_instance_agree(self):
+        x, t = data()
+        r = []
+        for m in ('BFGS', optimize.minimize(method='BFGS', tol=1e-8)):
+            N = spinn([1, 8, 1], f=jnp.tanh, key=1)
+            r.append(N.train(x, t, method=m, tol=1e-8, maxiter=100))
+        assert r[0].fun == r[1].fun and r[0].nit == r[1].nit
+
+    def test_options_not_changed(self):
+        # train passes its own arguments to a copy of the optimizer
+        x, t = data()
+        o = optimize.minimize(options={'maxcor': 5})
+        N = spinn([1, 8, 1], f=jnp.tanh, key=1)
+        N.train(x, t, method=o, tol=1e-6, options={'ftol': 0.},
+                maxiter=50)
+        assert o.tol == 1e-10 and o.options == {'maxcor': 5}
+
+    def test_callback_stop(self):
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+
+        calls = []
+
+        def cb(intermediate_result):
+            calls.append(1)
+            if len(calls) >= 5:
+                raise StopIteration
+        r = N.train(x, t, callback=cb, maxiter=500)
+        assert r.status == 99 and r.nouter == 1 and r.nit == 5
+
+    def test_own_optimizer(self):
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        f0 = N._loss(N.w, jnp.ones(2), x, t)
+        r = N.train(x, t, method=gd, balance=None, maxiter=200)
+        assert r.nit == 200 and r.fun < f0
+        np.testing.assert_allclose(N._loss(N.w, jnp.ones(2), x, t), r.fun,
+                                   rtol=1e-5)
+        with pytest.raises(TypeError):  # scipy arguments
+            N.train(x, t, method=gd, options={'maxcor': 5})
+
+
 def swish(x):       # module-level activation, saved by its dotted path
     return x*jax.nn.sigmoid(x)
 
@@ -484,5 +550,4 @@ class TestActivations:
 
 
 if __name__ == "__main__":
-    import pytest
     pytest.main()

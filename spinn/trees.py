@@ -8,10 +8,10 @@ import jax.numpy as jnp
 import networkx as nx
 import numpy as np
 from jax.experimental.sparse import BCOO
-from scipy.optimize import minimize
 
 from spinn import graphs, utils
 from spinn import balance as balancing
+from spinn import optimize as optimizers
 
 
 class spinn:
@@ -217,11 +217,11 @@ class spinn:
     def _lossg(self, w, lmbd, *args):
         return self._loss(w, lmbd, *args)
 
-    def train(self, *args, tol=1e-10, maxiter=None, disp=False,
+    def train(self, *args, tol=None, maxiter=None, disp=False,
               method='L-BFGS-B', balance='curv', **kwargs):
         """
-        Train network with scipy.optimize.minimize ('L-BFGS-B' by default)
-        on the weighted sum of 'terms':
+        Train network with the optimizer 'method' (scipy's 'L-BFGS-B' by
+        default) on the weighted sum of 'terms':
 
             sum(lmbd * terms)
 
@@ -250,11 +250,17 @@ class spinn:
         after each optimizer run (scipy's own output, where supported, is
         switched on with options={'disp': True}).
 
+        'method' is an optimizer from spinn.optimize: a scipy method name
+        (e.g. 'L-BFGS-B', 'BFGS'), an optimizer class, or an instance with
+        own options, e.g. spinn.optimize.minimize(method='BFGS', tol=1e-8).
+        'tol' sets the tolerance of the optimizer (1e-10 for minimize). For
+        minimize, the other keyword arguments ('options', 'bounds', ...) are
+        passed to scipy.optimize.minimize. 'callback' is passed to the
+        optimizer.
+
         'maxiter' limits the total number of optimizer iterations (default
-        15000). Other keyword arguments (e.g. 'options', 'callback') are
-        passed to scipy.optimize.minimize. The weights are returned in
-        'res.lmbd', the unweighted terms in
-        'res.terms'; 'res.fun' is the weighted loss, 'res.nouter' the
+        15000). The weights are returned in 'res.lmbd', the unweighted terms
+        in 'res.terms'; 'res.fun' is the weighted loss, 'res.nouter' the
         number of optimizer runs.
         """
         if hasattr(self, 'loss'):
@@ -269,31 +275,29 @@ class spinn:
             raise AttributeError("'eqc' and 'ineqc' are not supported any "
                                  "more, return the constraints as 'terms' "
                                  "after the equation")
-        options = dict(kwargs.pop('options', None) or {})
         callback = kwargs.pop('callback', None)
+        opt = copy.deepcopy(optimizers.get(method))  # state of this training
+        if tol is not None:
+            opt.tol = tol
+        if kwargs:
+            if not isinstance(opt, optimizers.minimize):
+                raise TypeError("%s got unexpected arguments %s"
+                                % (type(opt).__name__, list(kwargs)))
+            options = kwargs.pop('options', None) or {}
+            opt.options = dict(opt.options or {}, **options)
+            opt.kwargs = dict(opt.kwargs or {}, **kwargs)
         b = copy.deepcopy(balancing.get(balance))  # state of this training
         if maxiter is None:
             maxiter = 15000  # scipy's default for L-BFGS-B
-
-        def f64(fun):
-            def wrapped(*a):
-                return np.asarray(fun(*a), dtype=np.float64)
-            return wrapped
 
         def terms(w):
             return np.asarray(self._terms(w, *args), np.float64)
 
         def run(w, lmbd, n):
-            opts = dict(options, maxiter=n)
-            if method == 'L-BFGS-B':
-                # scipy's default maxfun=15000 would stop long runs early
-                opts.setdefault('maxfun', 10*n)
-                # and maxls=20 fails the line search on stiff losses
-                opts.setdefault('maxls', 50)
-            return minimize(f64(self._loss), w,
-                            (jnp.asarray(lmbd, dtype),) + args,
-                            jac=f64(self._lossg), method=method, tol=tol,
-                            options=opts, callback=callback, **kwargs)
+            lmbd = jnp.asarray(lmbd, dtype)
+            return opt(lambda w: self._loss(w, lmbd, *args),
+                       lambda w: self._lossg(w, lmbd, *args),
+                       w, n, callback)
 
         def weights(w, current):  # current - weights in the loss so far
             return np.asarray(b(self, w, current, *args), np.float64)
