@@ -449,11 +449,12 @@ class gd(optimize.optimizer):
     """Plain gradient descent, own optimizer for the tests."""
     step = 0.05
 
-    def __call__(self, loss, grad, w, n, callback=None):
+    def __call__(self, model, w, lmbd, *args, n, callback=None):
         for i in range(n):
-            w = w - self.step*grad(w)
-        return optimize.OptimizeResult(x=w, fun=float(loss(w)), nit=n,
-                                       nfev=n, status=1, success=False)
+            w = w - self.step*model._lossg(w, lmbd, *args)
+        return optimize.OptimizeResult(
+            x=w, fun=float(model._loss(w, lmbd, *args)), nit=n, nfev=n,
+            status=1, success=False)
 
 
 class TestOptimize:

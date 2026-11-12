@@ -10,11 +10,16 @@ class attributes, which can be changed per instance:
 
     class mine(optimizer):
         step = 1e-3
-        def __call__(self, loss, grad, w, n, callback=None):
+        def __call__(self, model, w, lmbd, *args, n, callback=None):
             for i in range(n):
-                w = w - self.step*grad(w)
-            return OptimizeResult(x=w, fun=loss(w), nit=n, nfev=n,
-                                  status=1, success=False)
+                w = w - self.step*model._lossg(w, lmbd, *args)
+            return OptimizeResult(x=w, fun=model._loss(w, lmbd, *args),
+                                  nit=n, nfev=n, status=1, success=False)
+
+'model._loss(w, lmbd, *args)' is the loss, sum(lmbd * terms), and
+'model._lossg' its gradient; both are jitted and can be used inside own
+jitted code (the model is a pytree), so the whole run can be compiled once
+per problem.
 
 'train' deep-copies the optimizer, so an optimizer can keep its state
 (e.g. moments) in its attributes between the runs of one training.
@@ -42,10 +47,12 @@ class optimizer:
                                 % (type(self).__name__, k))
             setattr(self, k, v)
 
-    def __call__(self, loss, grad, w, n, callback=None):
-        """Minimize 'loss(w)' (jax functions 'loss' and its gradient 'grad'
-        of the flat network weights) for at most 'n' iterations, starting
-        from 'w'. Return a scipy OptimizeResult with at least 'x', 'fun',
+    def __call__(self, model, w, lmbd, *args, n, callback=None):
+        """Minimize the loss of 'model', model._loss(w, lmbd, *args), over
+        the flat network weights 'w' for at most 'n' iterations, starting
+        from 'w' (numpy float64); 'lmbd' (weights of the terms, in the
+        precision of the network) and 'args' (arguments of 'terms') are
+        fixed. Return a scipy OptimizeResult with at least 'x', 'fun',
         'nit', 'nfev', 'status' (99 if stopped by 'callback') and
         'success'."""
         raise NotImplementedError
@@ -83,7 +90,12 @@ class minimize(optimizer):
     options = None
     kwargs = None
 
-    def __call__(self, loss, grad, w, n, callback=None):
+    def __call__(self, model, w, lmbd, *args, n, callback=None):
+        def loss(w):
+            return model._loss(w, lmbd, *args)
+
+        def grad(w):
+            return model._lossg(w, lmbd, *args)
         opts = dict(self.options or {}, maxiter=n)
         if self.method.upper() == 'L-BFGS-B':
             opts.setdefault('maxfun', 10*n)

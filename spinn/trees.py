@@ -295,9 +295,7 @@ class spinn:
 
         def run(w, lmbd, n):
             lmbd = jnp.asarray(lmbd, dtype)
-            return opt(lambda w: self._loss(w, lmbd, *args),
-                       lambda w: self._lossg(w, lmbd, *args),
-                       w, n, callback)
+            return opt(self, w, lmbd, *args, n=n, callback=callback)
 
         def weights(w, current):  # current - weights in the loss so far
             return np.asarray(b(self, w, current, *args), np.float64)
