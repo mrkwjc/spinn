@@ -38,10 +38,11 @@ res = P.train(x, 0.2, f0, bx)
 F = P(x)                                    # solution at the points
 ```
 
-`train` minimizes the weighted sum of the terms with scipy's L-BFGS-B. The
-weights are balanced automatically (`balance='curv'` by default, see
-`spinn.balance` for the other rules, e.g. `balance='curvsens'`), or given
-explicitly as `balance=[1., 10., 10.]`. The final weights are returned in
+`train` minimizes the weighted sum of the terms with L-BFGS (of optax, run on
+the GPU or CPU without copies to the host; `method='L-BFGS-B'` and other
+scipy methods are available too). The weights are balanced automatically
+(`balance='curv'` by default, see `spinn.balance` for the other rules, e.g.
+`balance='curvsens'`), or given explicitly as `balance=[1., 10., 10.]`. The final weights are returned in
 `res.lmbd` and the unweighted terms in `res.terms`.
 
 Activations of the hidden layers are set with `f`: a name from `jax.nn` or

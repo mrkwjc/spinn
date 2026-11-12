@@ -523,7 +523,7 @@ class TestOptimize:
             calls.append(1)
             if len(calls) >= 5:
                 raise StopIteration
-        r = N.train(x, t, callback=cb, maxiter=500)
+        r = N.train(x, t, method='L-BFGS-B', callback=cb, maxiter=500)
         assert r.status == 99 and r.nouter == 1 and r.nit == 5
 
     def test_own_optimizer(self):

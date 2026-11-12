@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Changed (may need changes in your code)
+
+- **The default optimizer is `'lbfgs'`**: L-BFGS of optax, run in a
+  compiled loop on the device of the network (no copies to the host between
+  iterations). On the examples it is 1.5–2.7× faster than scipy's L-BFGS-B
+  on the GPU, with equal or better accuracy. `method='L-BFGS-B'` gives the
+  previous behaviour. scipy's arguments (`options`, `bounds`, ...) need a
+  scipy method; with `'lbfgs'` they raise a `TypeError`. `callback` is
+  called every 100 iterations (option `chunk`) with the best weights so far.
+- **optax** is a new dependency.
+
+### Added
+
+- **Optimizer classes** in the new module `spinn.optimize`, like the
+  balancers: `lbfgs` (options `tol`, `patience`, `memory_size`, `chunk`),
+  `minimize` (any scipy method, e.g. `minimize(method='BFGS', tol=1e-8)`),
+  and your own optimizer as a subclass of `spinn.optimize.optimizer`.
+  `method` accepts a name, a class or an instance.
+
+### Fixed
+
+- `'sens'` weights when a term is exactly zero (in float32): the other
+  weights went to the cap, 1e12, and training failed (`'curvsens'` on the
+  cantilever example).
+
 ## 0.3.0 (2026-11-11)
 
 The problem is now defined by its loss terms, and `train` balances them

@@ -218,10 +218,11 @@ class spinn:
         return self._loss(w, lmbd, *args)
 
     def train(self, *args, tol=None, maxiter=None, disp=False,
-              method='L-BFGS-B', balance='curv', **kwargs):
+              method='lbfgs', balance='curv', **kwargs):
         """
-        Train network with the optimizer 'method' (scipy's 'L-BFGS-B' by
-        default) on the weighted sum of 'terms':
+        Train network with the optimizer 'method' (L-BFGS of optax, run on
+        the device of the network, by default) on the weighted sum of
+        'terms':
 
             sum(lmbd * terms)
 
@@ -247,18 +248,19 @@ class spinn:
         'terms' (combined in any way) is minimized as is.
 
         'disp' prints the terms, the weights and the number of iterations
-        after each optimizer run (scipy's own output, where supported, is
-        switched on with options={'disp': True}).
+        after each optimizer run (with a scipy method, scipy's own output,
+        where supported, is switched on with options={'disp': True}).
 
-        'method' is an optimizer from spinn.optimize: 'lbfgs' (L-BFGS of
-        optax, run on the device of the network, e.g. the GPU), a scipy
-        method name (e.g. 'L-BFGS-B', 'BFGS'), an optimizer class, or an
-        instance with own options, e.g.
+        'method' is an optimizer from spinn.optimize: 'lbfgs' (default;
+        L-BFGS of optax, no copies to the host between iterations, so it is
+        fast on the GPU), a scipy method name (e.g. 'L-BFGS-B', 'BFGS'), an
+        optimizer class, or an instance with own options, e.g.
         spinn.optimize.minimize(method='BFGS', tol=1e-8).
-        'tol' sets the tolerance of the optimizer (1e-10 for minimize). For
-        minimize, the other keyword arguments ('options', 'bounds', ...) are
-        passed to scipy.optimize.minimize. 'callback' is passed to the
-        optimizer.
+        'tol' sets the tolerance of the optimizer (1e-10 by default). For
+        scipy methods, the other keyword arguments ('options', 'bounds',
+        ...) are passed to scipy.optimize.minimize. 'callback' is passed to
+        the optimizer ('lbfgs' calls it every 'chunk' = 100 iterations, with
+        the best weights so far).
 
         'maxiter' limits the total number of optimizer iterations (default
         15000). The weights are returned in 'res.lmbd', the unweighted terms
