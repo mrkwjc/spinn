@@ -250,9 +250,11 @@ class spinn:
         after each optimizer run (scipy's own output, where supported, is
         switched on with options={'disp': True}).
 
-        'method' is an optimizer from spinn.optimize: a scipy method name
-        (e.g. 'L-BFGS-B', 'BFGS'), an optimizer class, or an instance with
-        own options, e.g. spinn.optimize.minimize(method='BFGS', tol=1e-8).
+        'method' is an optimizer from spinn.optimize: 'lbfgs' (L-BFGS of
+        optax, run on the device of the network, e.g. the GPU), a scipy
+        method name (e.g. 'L-BFGS-B', 'BFGS'), an optimizer class, or an
+        instance with own options, e.g.
+        spinn.optimize.minimize(method='BFGS', tol=1e-8).
         'tol' sets the tolerance of the optimizer (1e-10 for minimize). For
         minimize, the other keyword arguments ('options', 'bounds', ...) are
         passed to scipy.optimize.minimize. 'callback' is passed to the

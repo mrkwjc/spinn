@@ -468,6 +468,8 @@ class TestOptimize:
             optimize.minimize(lr=1.)
         with pytest.raises(TypeError):
             optimize.get(len)
+        assert isinstance(optimize.get('lbfgs'), optimize.lbfgs)
+        assert isinstance(optimize.get('LBFGS'), optimize.lbfgs)
 
     def test_name_and_instance_agree(self):
         x, t = data()
@@ -509,6 +511,55 @@ class TestOptimize:
                                    rtol=1e-5)
         with pytest.raises(TypeError):  # scipy arguments
             N.train(x, t, method=gd, options={'maxcor': 5})
+
+    def test_lbfgs(self):
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        T0 = np.asarray(N._terms(N.w, x, t))
+        r = N.train(x, t, method='lbfgs', maxiter=2000)
+        assert np.all(r.terms < 0.1*T0) and r.nit <= 2000
+        # the best weights of the last run are kept
+        np.testing.assert_allclose(
+            N._loss(N.w, jnp.asarray(r.lmbd, N.w.dtype), x, t), r.fun,
+            rtol=1e-5)
+
+    def test_lbfgs_limits(self):
+        x, t = data()
+        N = spinn([1, 8, 1], f=jnp.tanh, key=1)
+        f0 = float(N._loss(N.w, jnp.ones(1), x, t))
+        r = N.train(x, t, method='lbfgs', maxiter=7)
+        assert r.nit == 7 and r.status == 1 and not r.success
+        assert r.fun <= f0
+        r = N.train(x, t, method=optimize.lbfgs(tol=1e-2), maxiter=500)
+        assert r.status == 0 and r.success and r.nit < 500
+
+    def test_lbfgs_callback(self):
+        x, t = data()
+        N = spinn([1, 8, 1], f=jnp.tanh, key=1)
+        seen = []
+
+        def cb(intermediate_result):
+            seen.append(intermediate_result.nit)
+            if len(seen) == 2:
+                raise StopIteration
+        r = N.train(x, t, method=optimize.lbfgs(chunk=3, tol=0.),
+                    callback=cb, maxiter=100)
+        assert seen == [3, 6] and r.status == 99 and r.nit == 6
+        xs = []
+        N.train(x, t, method=optimize.lbfgs(chunk=4, tol=0.),
+                callback=xs.append, maxiter=10)
+        assert len(xs) == 3 and xs[0].shape == N.w.shape
+
+    def test_lbfgs_compiles_once(self):
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        N.train(x, t, method='lbfgs', maxiter=50)
+        n = optimize._lbfgs_run._cache_size()
+        for key in (2, 3):  # new networks, balanced: several runs each
+            N = fit2([1, 8, 1], f=jnp.tanh, key=key)
+            r = N.train(x, t, method='lbfgs', maxiter=600,
+                        balance=balance.curv(inner=100))
+        assert r.nouter > 1 and optimize._lbfgs_run._cache_size() == n
 
 
 def swish(x):       # module-level activation, saved by its dotted path
