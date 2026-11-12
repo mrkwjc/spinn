@@ -282,7 +282,8 @@ class sens(balancer):
     the RMS of each output (scale='rms') or not ('none'). log(s) is
     averaged over the updates with avg='ema' (weight 1/2 to the new value)
     or not ('none'). The smallest weight is 1, weights are capped at
-    'lmax'.
+    'lmax'. A term at exactly zero has no sensitivity (zero gradient) and
+    keeps its previous weight.
 
     The terms most able to move the solution get the most weight: e.g.
     Dirichlet conditions, which set the solution, above Neumann ones. The
@@ -333,8 +334,20 @@ class sens(balancer):
             du = du/sig[fid]
         elif self.scale != 'none':
             raise ValueError("scale must be 'rms' or 'none'")
-        s = np.linalg.norm(du, axis=1)/np.maximum(np.sqrt(T), 1e-300)
+        # a term at exactly 0 (reached in float32) has a zero gradient, so
+        # its sensitivity is 0/0: it keeps its previous value (the median
+        # of the others at the first update) and is not the reference
+        ok = T > 0
+        if not ok.any():
+            lf = np.zeros(len(T)) if self._lf is None else self._lf
+            self._lf = lf
+            return np.clip(np.exp(lf), 1., self.lmax)
+        s = np.linalg.norm(du, axis=1)/np.sqrt(np.where(ok, T, 1.))
         lf = np.log(np.maximum(s, 1e-300))
+        lf -= lf[ok].min()
+        if not ok.all():
+            lf[~ok] = (np.median(lf[ok]) if self._lf is None
+                       else self._lf[~ok])
         lf -= lf.min()
         if self.avg == 'ema' and self._lf is not None:
             lf = 0.5*lf + 0.5*self._lf

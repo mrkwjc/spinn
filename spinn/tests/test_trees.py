@@ -240,6 +240,31 @@ class TestTrain:
         r2 = N.train(x, bx, maxiter=3000, balance=b)
         np.testing.assert_allclose(r2.lmbd, r.lmbd)
 
+    def test_sens_zero_term(self):
+        # a term at exactly 0 (float32) has a zero gradient: sensitivity 0/0;
+        # it must not become the reference (all other weights at the cap)
+        class zero(poisson):
+            @jax.jit
+            def terms(self, w, x, bx):
+                T = poisson.terms(self, w, x, bx)
+                return T[0], T[1], 0.*T[2]
+        x = (jnp.linspace(0., .5, 11)[:, None],
+             jnp.linspace(.5, 1., 11)[:, None])
+        bx = jnp.asarray([[0.], [1.]])
+        N = zero([1, 8, 2], f=jnp.tanh, key=2)
+        P = poisson([1, 8, 2], f=jnp.tanh, key=2)
+        b = balance.sens(avg='none')
+        lm = b(N, N.w, None, x, bx)
+        assert np.all(np.isfinite(lm)) and lm.max() < 1e6
+        assert lm[:2].min() == 1 and lm[:2].min() <= lm[2] <= lm[:2].max()
+        # a later update: the zero term keeps its previous log-sensitivity
+        b = balance.sens(avg='none')
+        b(P, N.w, None, x, bx)
+        prev = b._lf.copy()
+        lm = b(N, N.w, None, x, bx)
+        assert np.all(np.isfinite(lm)) and lm[:2].min() == 1
+        np.testing.assert_allclose(np.log(lm[2]), prev[2], rtol=1e-12)
+
     def test_sens_parts(self):
         x = (jnp.linspace(0., .5, 11)[:, None],
              jnp.linspace(.5, 1., 11)[:, None])
