@@ -166,7 +166,8 @@ class balancer:
         raise NotImplementedError
 
     def advance(self):
-        """Move to the next phase; False if there is none."""
+        """Move to the next phase; False if there is none. 'train' calls it
+        until it returns False, then no more."""
         return False
 
     def __repr__(self):

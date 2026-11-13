@@ -644,6 +644,24 @@ class TestOptimize:
                     balance=b)
         assert set(calls) == {2.} and r.nit == 200
 
+        # 'advance' returns False only once, so a balancer which changes its
+        # state in 'advance' anyway does not move past its last phase
+        class two(balance.balancer):
+            inner = 20
+            phase = 0
+
+            def advance(self):
+                self.phase += 1
+                return self.phase < 2
+
+            def __call__(self, model, w, lmbd, *args):
+                calls.append(self.phase)
+                return [1., 2.] if self.phase == 0 else [1., 5.]
+        calls.clear()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r = N.train(x, t, method='adam', maxiter=200, balance=two())
+        assert calls[0] == 0 and max(calls) <= 2 and r.nit == 200
+
     def test_adam_schedule(self):
         # the schedule counts the iterations of the whole training, the
         # instance passed to train is not changed

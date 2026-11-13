@@ -313,6 +313,7 @@ class spinn:
         inner = opt.inner if b.inner is None else b.inner
         lmbd = weights(w, None)
         nit = nfev = k = short = 0
+        last = False  # the balancer has no next phase ('advance' said so)
         while True:
             n = int(min(inner, maxiter - nit))
             res = run(w, lmbd, n)
@@ -345,12 +346,14 @@ class spinn:
             # an 'anytime' optimizer (e.g. adam, its runs do not converge)
             # moves to the next phase once the weights settle, and in the
             # last phase goes on
-            if done or (settled and opt.anytime):
-                if b.advance():  # next phase of the balancer, if any
+            if done or (settled and opt.anytime and not last):
+                if not last and b.advance():  # next phase, if any
                     short = 0
                     new = weights(w, lmbd)
                 elif done:
                     break
+                else:  # never asked again: 'advance' returns False once
+                    last = True
             lmbd = new
         self.w = jnp.asarray(w)
         res.nit, res.nfev, res.nouter = nit, nfev, k
