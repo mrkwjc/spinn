@@ -338,6 +338,57 @@ class TestTrain:
         r = N.train(x, t, maxiter=2000, balance=two(outer=1))
         assert set(calls) == {0} and r.nouter == 1
 
+    def test_seeds(self):
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r = N.train(x, t, maxiter=200, seeds=[1, 2, 3])
+        assert r.seeds == [1, 2, 3] and r.seed in r.seeds
+        assert len(r.scores) == 3 and r.fun == r.scores.min()
+        assert r.scores[r.seeds.index(r.seed)] == r.fun
+        # the network keeps the weights of the best training
+        np.testing.assert_allclose(
+            N._loss(N.w, jnp.asarray(r.lmbd, N.w.dtype), x, t), r.fun,
+            rtol=1e-5)
+        # the same as one training from the seed kept
+        M = fit2([1, 8, 1], f=jnp.tanh, key=r.seed)
+        r1 = M.train(x, t, maxiter=200)
+        np.testing.assert_allclose(r1.fun, r.fun, rtol=1e-4)
+        # random seeds are reported
+        r = N.train(x, t, maxiter=50, seeds=2)
+        assert len(r.seeds) == 2 and all(type(k) is int for k in r.seeds)
+        assert r.seed in r.seeds
+        for bad in (0, []):
+            with pytest.raises(ValueError):
+                N.train(x, t, seeds=bad)
+
+    def test_seeds_callback_stop(self):
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+
+        def cb(xk):
+            raise StopIteration
+        r = N.train(x, t, maxiter=500, seeds=[4, 5, 6], callback=cb)
+        assert r.status == 99 and r.seeds == [4] and len(r.scores) == 1
+
+    def test_seeds_exception(self):
+        # an exception in a later training: raised, the network keeps the
+        # best finished training
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r = N.train(x, t, maxiter=100, seeds=[4])
+        w4 = N.w
+        n = []
+
+        def cb(xk):
+            n.append(1)
+            if len(n) > 1:      # second seed
+                raise KeyboardInterrupt
+        with pytest.raises(KeyboardInterrupt):
+            N.train(x, t, maxiter=100, seeds=[4, 5],
+                    method=optimize.lbfgs(chunk=100), callback=cb)
+        np.testing.assert_array_equal(N.w, w4)
+        assert r.seed == 4
+
     def test_equal_and_fixed_weights(self):
         x, t = data()
         N = fit2([1, 8, 1], f=jnp.tanh, key=1)

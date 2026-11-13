@@ -27,6 +27,9 @@
   `method` accepts a name, a class or an instance. The optimizer sets the
   defaults of `maxiter` and of the balancer's `inner` (`balancer.inner` is
   now `None`, meaning the optimizer's).
+- **Best of several initial weights:** `train(..., seeds=3)` (or a list of
+  seeds) trains from each and keeps the training with the lowest loss;
+  `res.seed`, `res.seeds` and `res.scores` report them.
 
 ### Fixed
 

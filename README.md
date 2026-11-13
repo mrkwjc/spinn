@@ -42,8 +42,10 @@ F = P(x)                                    # solution at the points
 the GPU or CPU without copies to the host; `method='L-BFGS-B'` and other
 scipy methods are available too). The weights are balanced automatically
 (`balance='curv'` by default, see `spinn.balance` for the other rules, e.g.
-`balance='curvsens'`), or given explicitly as `balance=[1., 10., 10.]`. The final weights are returned in
-`res.lmbd` and the unweighted terms in `res.terms`.
+`balance='curvsens'`), or given explicitly as `balance=[1., 10., 10.]`. The
+final weights are returned in `res.lmbd` and the unweighted terms in
+`res.terms`. With `seeds=3` the network is trained from three random initial
+weights and the best training is kept (`res.seed` reproduces it).
 
 Activations of the hidden layers are set with `f`: a name from `jax.nn` or
 `jax.numpy` (`f='tanh'`, `f='sin'`, `f='gelu'`; softplus by default), a
