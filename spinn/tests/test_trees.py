@@ -1040,13 +1040,44 @@ class TestActivations:
 
     def test_dump_load(self, tmp_path):
         x, _ = data()
-        fname = str(tmp_path/'n.pkl')
+        fname = str(tmp_path/'n.net')
         for f, p in (('gelu', None), ('elu', (0.5,)), (swish, None)):
             N = spinn([1, 8, 1], f=f, p=p, initx=x, key=1)
             N.dump(fname)
             M = spinn.load(fname)
-            assert M.f == N.f
+            assert M.f == N.f and M.wshp == N.wshp
+            assert M.w.dtype == N.w.dtype
+            np.testing.assert_array_equal(M.w, N.w)
             np.testing.assert_allclose(M(x), N(x))
+        # an NPZ file under the given name, readable with numpy alone
+        import json
+        import os
+        assert os.listdir(tmp_path) == ['n.net']
+        with np.load(fname, allow_pickle=False) as z:
+            meta = json.loads(str(z['__meta__']))
+            np.testing.assert_array_equal(z['w'], N.w)
+        assert meta['format'] == 'spinn.network'
+        assert meta['cls'] == 'spinn.trees.spinn' and meta['ni'] == 1
+        # not a network file
+        from spinn import storage
+        storage.save(fname, 'other', 1, {})
+        with pytest.raises(ValueError, match="holds 'other'"):
+            spinn.load(fname)
+
+    def test_load_old_pickle(self, tmp_path):
+        # files of 'dump' up to spinn 0.3 (pickled lists) still load
+        import pickle
+        x, _ = data()
+        N = spinn([1, 8, 1], f='elu', p=(0.5,), initx=x, key=1)
+        (w, p), aux = N._tree_flatten()
+        children = (w.tolist(),
+                    [[np.asarray(pij).tolist() for pij in pi] for pi in p])
+        fname = str(tmp_path/'old.pkl')
+        with open(fname, 'wb') as f:
+            pickle.dump((children, aux), f)
+        with pytest.warns(FutureWarning, match='old format'):
+            M = spinn.load(fname)
+        np.testing.assert_allclose(M(x), N(x))
 
     def test_lambda(self, tmp_path):
         import pytest

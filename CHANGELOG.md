@@ -13,6 +13,12 @@
   called every 100 iterations (option `chunk`) with the best network weights
   so far.
 - **optax** is a new dependency.
+- **`dump` writes a numpy NPZ archive** (weights and activation parameters
+  as arrays, the rest as JSON text) instead of a pickle: loading runs no
+  code from the file, and the content is readable with numpy alone.
+  `load` still reads files of spinn 0.3 and older, with a `FutureWarning`;
+  save them again with `dump`. Pickling a network (`pickle.dumps`) is
+  unchanged.
 - **Wording:** the weights of the loss terms (`lmbd`) are called *lambdas*
   in the documentation; *weights* are those of the network.
 

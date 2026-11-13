@@ -9,7 +9,7 @@ import networkx as nx
 import numpy as np
 from jax.experimental.sparse import BCOO
 
-from spinn import graphs, utils
+from spinn import graphs, utils, storage
 from spinn import balance as balancing
 from spinn import optimize as optimizers
 from spinn import monitor as monitoring
@@ -629,8 +629,10 @@ class spinn:
 
     def dump(self, fname):
         """
-        Save the network (weights, activations and their parameters) to the
-        file 'fname' as plain lists and names, readable by 'load'.
+        Save the network (weights, activations and their parameters,
+        structure) to the file 'fname', readable by 'load'. The file is a
+        numpy NPZ archive: weights and parameters as arrays, the rest as
+        JSON text (readable with numpy alone, see spinn.storage).
         Activations given as lambdas or local functions cannot be saved.
         """
         for i, fi in enumerate(self.f):
@@ -639,23 +641,46 @@ class spinn:
                     "activation of layer %d is a lambda or local function and "
                     "cannot be saved; define it in a module or use a name "
                     "from jax.nn / jax.numpy" % i)
-        (children, aux_data) = self._tree_flatten()
-        # pickle lists
-        w, p = children
-        wlst = w.tolist()
-        plst = [[np.asarray(pij).tolist() for pij in pi] for pi in p]
-        children = (wlst, plst)
-        #
-        with open(fname, 'wb') as f:
-            pickle.dump((children, aux_data), f)
+        storage.save(fname, 'spinn.network', 1, *self._plain())
+
+    def _plain(self):
+        """The network as JSON metadata and arrays (for 'dump')."""
+        (w, p), aux = self._tree_flatten()
+        arrays = {'w': np.asarray(w)}
+        for i, pi in enumerate(p):
+            for j, pij in enumerate(pi):
+                arrays['p_%d_%d' % (i, j)] = np.asarray(pij)
+        cls = type(self)
+        meta = dict(aux, nparams=[len(pi) for pi in p],
+                    cls='%s.%s' % (cls.__module__, cls.__qualname__))
+        return meta, arrays
+
+    @classmethod
+    def _from_plain(cls, meta, arrays):
+        aux = {k: meta[k] for k in ('nlst', 'n', 'inps', 'outs', 'ni', 'no',
+                                    'nw', 'nb', 'f', 'sparse')}
+        aux['wshp'] = [storage.tuples(e) for e in meta['wshp']]
+        w = jnp.asarray(arrays['w'])
+        p = [[jnp.asarray(arrays['p_%d_%d' % (i, j)]) for j in range(n)]
+             for i, n in enumerate(meta['nparams'])]
+        obj = cls._tree_unflatten(aux, (w, p))
+        obj._register_pytree()
+        return obj
 
     @classmethod
     def load(cls, fname):
         """
         Network saved by 'dump' (as an instance of this class, e.g.
         heat.load(fname)). Activations given as 'module.function' need the
-        module to be importable.
+        module to be importable. Files of spinn 0.3 and older (pickled
+        lists) still load, with a warning; save them again with 'dump'.
         """
+        if storage.isnpz(fname):
+            arrays, meta = storage.load(fname, 'spinn.network')
+            return cls._from_plain(meta, arrays)
+        warnings.warn("%s is in the old format of 'dump' (pickle), which "
+                      "will not be read in the future; save it again with "
+                      "'dump'" % fname, FutureWarning, stacklevel=2)
         with open(fname, 'rb') as f:
             (children, aux_data) = pickle.load(f)
         # make arrays again
