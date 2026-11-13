@@ -59,11 +59,14 @@ class optimizer:
                   balancer, used if the balancer does not set them (500)
         maxiter - default of 'maxiter' of 'train', the total number of
                   iterations (15000)
+        every   - default iterations between the records of a monitor
+                  (spinn.monitor), if it does not set them (100)
     """
     tol = None
     anytime = False
     inner = 500
     maxiter = 15000
+    every = 100
 
     def __init__(self, **options):
         for k, v in options.items():
@@ -321,6 +324,8 @@ class adam(_optax):
                    balancer does not set them)
         maxiter  - default of 'maxiter' of 'train' (30000; Adam needs more
                    iterations than L-BFGS)
+        every    - default iterations between the records of a monitor
+                   (500; its steps are cheap, so records cost more)
 
     The moments start from zero in each run (the scale of the loss changes
     with the lambdas); the schedule counts on. The best weights
@@ -330,6 +335,7 @@ class adam(_optax):
     anytime = True
     inner = 2000
     maxiter = 30000
+    every = 500
     b1 = .9
     b2 = .999
     eps = 1e-8

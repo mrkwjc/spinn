@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from spinn import utils, graphs, spinn, balance, optimize
+from spinn import utils, graphs, spinn, balance, optimize, monitor
 
 
 # Reference layered network, independent of spinn
@@ -751,6 +751,168 @@ class TestOptimize:
 
 def swish(x):       # module-level activation, saved by its dotted path
     return x*jax.nn.sigmoid(x)
+
+
+class fit2n(fit2):
+    def norm(self):        # a metric as a method of the model
+        return float(jnp.sum(self.w**2))
+
+
+class TestMonitor:
+    def test_rows(self):
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        m = monitor(every=20, keepw=True,
+                    metrics={'n': lambda P: float(jnp.sum(P.w**2))})
+        r = N.train(x, t, method='adam', maxiter=100,
+                    balance=balance.curv(inner=50), monitor=m)
+        h = m.history
+        # start, every 20 iterations, ends of the two runs
+        assert h['it'].tolist() == [0, 20, 40, 50, 70, 90, 100]
+        assert h['end'].tolist() == [False]*3 + [True] + [False]*2 + [True]
+        assert h['run'].tolist() == [0, 1, 1, 1, 2, 2, 2]
+        assert h['terms'].shape == (7, 2) and h['lmbd'].shape == (7, 2)
+        np.testing.assert_allclose(
+            h['loss'], np.sum(h['lmbd']*h['terms'], axis=1))
+        # metrics and weights at the recorded points, final weights
+        np.testing.assert_allclose(h['n'], np.sum(h['w']**2, axis=1),
+                                   rtol=1e-5)
+        np.testing.assert_allclose(m.final[None], N.w)
+        np.testing.assert_allclose(h['w'][-1], N.w)
+        assert r.nit == 100 and set(h['train']) == {0}
+
+    def test_scipy_and_callback(self):
+        # scipy calls back every iteration; the own callback still works
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        calls = []
+        m = monitor(every=10)
+        r = N.train(x, t, method='L-BFGS-B', maxiter=50,
+                    balance=balance.curv(inner=25), monitor=m,
+                    callback=lambda xk: calls.append(xk))
+        h = m.history
+        assert h['it'][0] == 0 and h['it'][-1] == r.nit
+        assert np.all(np.diff(h['it']) > 0) and len(calls) == r.nit
+        np.testing.assert_allclose(m.final[None], N.w)
+
+    def test_seeds_and_trainings(self):
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        m = monitor(every=50)
+        r = N.train(x, t, maxiter=100, seeds=[3, 4], monitor=m)
+        h = m.history
+        assert set(m.final) == {3, 4} and r.seed in (3, 4)
+        np.testing.assert_allclose(m.final[r.seed], N.w)
+        assert set(zip(h['train'], h['seed'])) == {(0, 3), (1, 4)}
+        assert m._seed is None and len(m.info) == 2
+        # a further training appends
+        N.train(x, t, maxiter=50, monitor=m)
+        assert set(m.history['train']) == {0, 1, 2} and None in m.final
+
+    def test_compare_and_info(self):
+        matplotlib = pytest.importorskip('matplotlib')  # not a dependency
+        matplotlib.use('Agg')
+        x, t = data()
+        m = monitor(every=20)
+        for method in ('lbfgs', 'adam'):
+            N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+            N.train(x, t, method=method, maxiter=40, monitor=m)
+        i = m.info[1]
+        assert i['method'] == 'adam' and i['balance'] == 'curv'
+        assert i['maxiter'] == 40 and i['every'] == 20 and i['nit'] == 40
+        assert 'start' in i and i['time'] >= 0 and 'optimizer' in i
+        ax = m.compare('loss').axes[0]
+        assert ax.get_legend_handles_labels()[1] == ['lbfgs', 'adam']
+        ax = m.compare('terms', term=1, x='it').axes[0]
+        assert ax.get_ylabel() == 'terms 1'
+        for bad in (dict(key='err'), dict(key='terms'), dict(x='s')):
+            with pytest.raises(ValueError):
+                m.compare(**bad)
+        m.plot(x='t')
+        # a problem with fewer terms: plot shows its own terms only
+        single([1, 8, 1], key=1).train(x, t, maxiter=10, monitor=m)
+        fig = m.plot()
+        assert [x.get_text() for x in fig.axes[0].get_legend().get_texts()] \
+            == ['term 0']
+        m.compare('terms', term=1)
+
+    def test_metrics_and_pickle(self):
+        import pickle
+        x, t = data()
+        N = fit2n([1, 8, 1], f=jnp.tanh, key=1)
+        m = monitor(every=10, tmax=0., metrics={
+            'a': lambda P: float(jnp.sum(P.w**2)),   # function
+            'b': 'norm',                             # method name
+            'c': fit2n.norm})                        # method as function
+        r = N.train(x, t, method='adam', maxiter=100, monitor=m)
+        assert r.status == 99 and m.metrics['c'] == 'norm'
+        h = m.history
+        np.testing.assert_allclose(h['a'], h['b'], rtol=1e-6)
+        np.testing.assert_allclose(h['b'], h['c'])
+        # plain data: the function is dropped, names and values remain
+        m2 = pickle.loads(pickle.dumps(m))
+        assert m2.metrics == {'a': None, 'b': 'norm', 'c': 'norm'}
+        assert m2._model is None and m2._args is None
+        np.testing.assert_array_equal(m2.history['a'], h['a'])
+        np.testing.assert_array_equal(m2.final[None], m.final[None])
+        # training needs the function again
+        m2.tmax = None
+        with pytest.raises(ValueError):
+            N.train(x, t, maxiter=10, monitor=m2)
+        m2.metrics['a'] = lambda P: 0.
+        N.train(x, t, maxiter=10, monitor=m2)
+        assert m2.history['a'][-1] == 0.
+        # a method the model does not have
+        with pytest.raises(ValueError):
+            fit2([1, 8, 1], key=1).train(x, t, maxiter=10,
+                                         monitor=monitor(metrics={'b': 'x'}))
+
+    def test_different_problems(self):
+        # fewer terms than another problem: nan in the extra columns
+        x, t = data()
+        m = monitor()
+        fit2([1, 8, 1], key=1).train(x, t, maxiter=10, monitor=m)
+        single([1, 8, 1], key=1).train(x, t, maxiter=10, monitor=m)
+        h = m.history
+        s = h['train'] == 1
+        assert h['terms'].shape[1] == 2 and h['lmbd'].shape[1] == 2
+        assert np.all(np.isnan(h['terms'][s, 1]))
+        assert np.all(np.isnan(h['lmbd'][s, 1]))
+        assert not np.any(np.isnan(h['terms'][~s]))
+        assert not np.any(np.isnan(h['loss']))
+
+    def test_tmax(self):
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        m = monitor(every=10, tmax=0.)
+        r = N.train(x, t, method='adam', maxiter=1000, monitor=m)
+        assert r.status == 99 and r.nit == 10
+
+    def test_options(self):
+        with pytest.raises(TypeError):
+            monitor(evry=10)
+        m = monitor()
+        assert m.history == {} and m.final == {} and m.every is None
+        assert optimize.lbfgs.every == 100 and optimize.adam.every == 500
+
+    def test_number_and_defaults(self):
+        # a number is 'every', True the default monitor; it is returned in
+        # res.monitor; 'every' defaults to the optimizer's
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r = N.train(x, t, method='adam', maxiter=60,
+                    balance=balance.curv(inner=60), monitor=25)
+        assert r.monitor.every == 25
+        assert r.monitor.history['it'].tolist() == [0, 25, 50, 60]
+        r = N.train(x, t, method='adam', maxiter=1000,
+                    balance=balance.curv(inner=1000), monitor=True)
+        assert r.monitor.history['it'].tolist() == [0, 500, 1000]
+        r = N.train(x, t, maxiter=50, seeds=[1, 2], monitor=10)
+        assert set(r.monitor.final) == {1, 2}       # one monitor for all
+        r = N.train(x, t, maxiter=5, monitor=False)
+        assert 'monitor' not in r
+        with pytest.raises(ValueError):
+            N.train(x, t, maxiter=5, monitor=0)
 
 
 class TestActivations:

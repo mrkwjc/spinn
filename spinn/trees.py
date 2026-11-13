@@ -12,6 +12,7 @@ from jax.experimental.sparse import BCOO
 from spinn import graphs, utils
 from spinn import balance as balancing
 from spinn import optimize as optimizers
+from spinn import monitor as monitoring
 
 
 class spinn:
@@ -218,7 +219,8 @@ class spinn:
         return self._loss(w, lmbd, *args)
 
     def train(self, *args, tol=None, maxiter=None, disp=False,
-              method='lbfgs', balance='curv', seeds=None, **kwargs):
+              method='lbfgs', balance='curv', seeds=None, monitor=None,
+              **kwargs):
         """
         Train network with the optimizer 'method' (L-BFGS of optax, run on
         the device of the network, by default) on the weighted sum of
@@ -283,6 +285,14 @@ class spinn:
         trainings. Stopping by 'callback' ends the search; so does an
         exception (e.g. Ctrl+C), which is raised after the network gets the
         best training so far.
+
+        'monitor' (spinn.monitor) records the course of the training: terms,
+        loss, lambdas and own metrics every 'every' iterations and at each
+        lambda update, and the final weights of each training (each seed);
+        e.g. monitor(every=100, tmax=600); a number is 'every' and True the
+        default monitor. It is returned in 'res.monitor' and not copied: a
+        given monitor can be read also after an interruption, see
+        'spinn.monitor'.
         """
         if hasattr(self, 'loss'):
             if type(self).terms is spinn.terms:
@@ -296,10 +306,18 @@ class spinn:
             raise AttributeError("'eqc' and 'ineqc' are not supported any "
                                  "more, return the constraints as 'terms' "
                                  "after the equation")
+        if monitor is True:
+            monitor = monitoring.monitor()
+        elif monitor is False:
+            monitor = None
+        elif isinstance(monitor, (int, np.integer)):
+            if monitor < 1:
+                raise ValueError("monitor: 'every' must be positive")
+            monitor = monitoring.monitor(every=int(monitor))
         if seeds is not None:
             return self._train_seeds(seeds, args, dict(
                 tol=tol, maxiter=maxiter, disp=disp, method=method,
-                balance=balance, **kwargs))
+                balance=balance, monitor=monitor, **kwargs))
         callback = kwargs.pop('callback', None)
         opt = copy.deepcopy(optimizers.get(method))  # state of this training
         if tol is not None:
@@ -314,11 +332,37 @@ class spinn:
         b = copy.deepcopy(balancing.get(balance))  # state of this training
         if maxiter is None:
             maxiter = opt.maxiter
+        mon = monitor
+        if mon is not None:
+            every = opt.every if mon.every is None else mon.every
+            if hasattr(opt, 'chunk'):  # optimizers on the device
+                opt.chunk = every
+            cb = callback
+            state = {}  # of the run: iterations before it, lambdas, run...
+
+            def callback(intermediate_result):  # noqa: F811
+                r = intermediate_result
+                state['calls'] += 1
+                # optimizers on the device give the iteration of the run,
+                # scipy calls back every iteration
+                it = state['nit'] + getattr(r, 'nit', state['calls'])
+                # (at the end of the run its own record follows)
+                if it - state['last'] >= every and it < state['end']:
+                    state['last'] = it
+                    mon._record(r.x, it, state['run'], state['phase'],
+                                state['lmbd'])
+                if cb is not None:
+                    optimizers._call(cb, r.x, getattr(r, 'fun', None), it)
+                if mon._timeout():
+                    raise StopIteration
 
         def terms(w):
             return np.asarray(self._terms(w, *args), np.float64)
 
         def run(w, lmbd, n):
+            if mon is not None:
+                state.update(calls=0, nit=nit, run=k + 1, lmbd=lmbd,
+                             phase=phase, end=nit + n)
             lmbd = jnp.asarray(lmbd, dtype)
             return opt(self, w, lmbd, *args, n=n, callback=callback)
 
@@ -331,8 +375,13 @@ class spinn:
             b = balancing.fixed()  # one term, nothing to balance
         inner = opt.inner if b.inner is None else b.inner
         lmbd = lambdas(w, None)
-        nit = nfev = k = short = 0
+        nit = nfev = k = short = phase = 0
         last = False  # the balancer has no next phase ('advance' said so)
+        if mon is not None:
+            mon._begin(self, args, opt, b, method=method, balance=balance,
+                       maxiter=maxiter, inner=inner, every=every)
+            state['last'] = 0
+            mon._record(w, 0, 0, 0, lmbd)
         while True:
             n = int(min(inner, maxiter - nit))
             res = run(w, lmbd, n)
@@ -340,6 +389,9 @@ class spinn:
             nit += res.nit
             nfev += res.nfev
             k += 1
+            if mon is not None:  # end of the run: the lambdas change
+                state['last'] = nit
+                mon._record(w, nit, k, phase, lmbd, end=True)
             if disp:
                 fmt = {'float_kind': lambda v: '%.2e' % v}
                 print('run %3d: nit %5d  terms %s  lmbd %s'
@@ -368,6 +420,7 @@ class spinn:
             if done or (settled and opt.anytime and not last):
                 if not last and b.advance():  # next phase, if any
                     short = 0
+                    phase += 1
                     new = lambdas(w, lmbd)
                 elif done:
                     break
@@ -378,6 +431,9 @@ class spinn:
         res.nit, res.nfev, res.nouter = nit, nfev, k
         res.lmbd = lmbd
         res.terms = terms(w)
+        if mon is not None:
+            mon._end(w, res)
+            res.monitor = mon
         return res
 
     def _train_seeds(self, seeds, args, kw):
@@ -395,6 +451,8 @@ class spinn:
                 if kw['disp']:
                     print('seed %d (%d of %d)' % (key, i + 1, len(seeds)))
                 self.initw(key)
+                if kw['monitor'] is not None:
+                    kw['monitor']._seed = key
                 res = self.train(*args, **kw)
                 score = float(res.fun)
                 scores.append(score)
@@ -405,6 +463,8 @@ class spinn:
         finally:  # also on an exception: the best training so far
             if best is not None:
                 self.w = best[2]
+            if kw['monitor'] is not None:
+                kw['monitor']._seed = None
         _, key, _, res = best
         res.seed, res.seeds, res.scores = key, seeds[:len(scores)], \
             np.array(scores)

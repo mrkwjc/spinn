@@ -33,6 +33,16 @@
 - **Best of several initial network weights:** `train(..., seeds=3)` (or a
   list of seeds) trains from each and keeps the training with the lowest
   loss; `res.seed`, `res.seeds` and `res.scores` report them.
+- **Training monitor** `spinn.monitor`: `train(..., monitor=monitor())`
+  records terms, loss, lambdas and own metrics (`metrics={'err': f}`) every
+  `every` iterations and at each lambda update, and the final weights of
+  each training and seed (`keepw=True` also the weights at each record).
+  `tmax` limits the time of a training. `m.history` gives numpy arrays,
+  `m.info` the settings and result of each training, `m.plot()` one
+  training (against iterations or time) and `m.compare('err')` a quantity
+  of all trainings in one figure. The monitor is not copied, so it can be
+  read also after an interruption. `train(..., monitor=200)` creates one
+  (`every=200`), returned in `res.monitor`.
 
 ### Fixed
 

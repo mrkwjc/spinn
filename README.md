@@ -66,6 +66,16 @@ Activations of the hidden layers are set with `f`: a name from `jax.nn` or
 function, or one per layer. Networks are saved with `P.dump(fname)` and
 restored with `heat.load(fname)`; see `help(spinn)` for details.
 
+The course of a training is recorded by a monitor:
+
+```python
+from spinn import monitor
+m = monitor(every=100, metrics={'err': lambda P: error(P)})
+P.train(x, 0.2, f0, bx, monitor=m)
+m.history['terms']    # numpy arrays, one row per record
+m.plot()
+```
+
 ## Accuracy
 
 Two options lower the error at a higher cost:
