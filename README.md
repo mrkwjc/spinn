@@ -91,4 +91,5 @@ Two options lower the error at a higher cost:
 
 More problems are in `examples/`: beams (with a support, and a cantilever),
 the heat equation, a heated plate in physical units and the Laplace
-equation, all compared with exact solutions.
+equation, all compared with exact solutions; `monitor.py` records and
+compares trainings of the beam.
