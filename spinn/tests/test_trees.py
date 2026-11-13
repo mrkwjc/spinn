@@ -327,7 +327,15 @@ class TestTrain:
             def __call__(self, model, w, lmbd, *args):
                 calls.append(self.phase)
                 return [1., 2.] if self.phase == 0 else [1., 5.]
-        r = N.train(x, t, maxiter=2000, balance=two())
+
+        class conv(gd):
+            # every run converges: the test does not depend on when L-BFGS
+            # stops in float32 (that differs between jax versions)
+            def __call__(self, *a, **k):
+                r = super().__call__(*a, **k)
+                r.status, r.success = 0, True
+                return r
+        r = N.train(x, t, maxiter=2000, balance=two(), method=conv())
         # phase 0 until its weights settle, then phase 1
         assert calls[0] == 0 and calls[-1] == 1
         assert sorted(calls) == calls and 0 in calls
@@ -335,7 +343,7 @@ class TestTrain:
         # hard stops (here 'outer', the number of optimizer runs) do not
         # advance, whatever the optimizer does
         calls.clear()
-        r = N.train(x, t, maxiter=2000, balance=two(outer=1))
+        r = N.train(x, t, maxiter=2000, balance=two(outer=1), method=conv())
         assert set(calls) == {0} and r.nouter == 1
 
     def test_seeds(self):
