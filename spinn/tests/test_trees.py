@@ -602,6 +602,21 @@ class TestOptimize:
                     maxiter=500)
         assert r.status == 0 and r.nit < 500
 
+    def test_optimizer_defaults(self):
+        # 'inner' and 'maxiter' come from the optimizer unless set
+        assert optimize.lbfgs.inner == 500 and optimize.lbfgs.maxiter == 15000
+        assert optimize.adam.inner == 2000 and optimize.adam.maxiter == 30000
+        assert balance.curv.inner is None
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r = N.train(x, t, method=optimize.adam(inner=20, maxiter=50))
+        assert r.nit == 50 and r.nouter == 3
+        r = N.train(x, t, method=optimize.adam(inner=20, maxiter=50),
+                    balance=balance.curv(inner=10))
+        assert r.nit == 50 and r.nouter == 5
+        r = N.train(x, t, method=optimize.adam(inner=20), maxiter=30)
+        assert r.nit == 30 and r.nouter == 2
+
     def test_anytime(self):
         # adam's runs do not converge: settled weights move to the next
         # phase, and the last phase runs until maxiter

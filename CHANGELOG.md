@@ -20,10 +20,13 @@
   `adam` (Adam of optax on the device; learning rate `lr`, a number or a
   schedule over the whole training, e.g. `adam(lr=1e-2)`; its runs do not
   converge, so balancers with phases, e.g. `'curvsens'`, move on once the
-  weights settle: option `anytime` of the optimizers),
+  weights settle: option `anytime` of the optimizers; by default it runs
+  2000 iterations between weight updates and 30000 in all),
   `minimize` (any scipy method, e.g. `minimize(method='BFGS', tol=1e-8)`),
   and your own optimizer as a subclass of `spinn.optimize.optimizer`.
-  `method` accepts a name, a class or an instance.
+  `method` accepts a name, a class or an instance. The optimizer sets the
+  defaults of `maxiter` and of the balancer's `inner` (`balancer.inner` is
+  now `None`, meaning the optimizer's).
 
 ### Fixed
 

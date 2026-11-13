@@ -54,9 +54,15 @@ class optimizer:
                   for as long as they run (e.g. adam): 'train' moves to the
                   next phase of the balancer once the weights settle, not
                   only after a converged run (default False)
+        inner   - default iterations between weight updates of the
+                  balancer, used if the balancer does not set them (500)
+        maxiter - default of 'maxiter' of 'train', the total number of
+                  iterations (15000)
     """
     tol = None
     anytime = False
+    inner = 500
+    maxiter = 15000
 
     def __init__(self, **options):
         for k, v in options.items():
@@ -310,6 +316,10 @@ class adam(_optax):
         anytime  - (default True) see 'optimizer'; e.g. 'curvsens' moves to
                    sensitivities once the curv weights settle, and the last
                    phase runs until 'maxiter'
+        inner    - iterations between weight updates (default 2000, if the
+                   balancer does not set them)
+        maxiter  - default of 'maxiter' of 'train' (30000; Adam needs more
+                   iterations than L-BFGS)
 
     The moments start from zero in each run (the scale of the loss changes
     with the weights of the terms); the schedule counts on. The best weights
@@ -317,6 +327,8 @@ class adam(_optax):
     """
     lr = 1e-3
     anytime = True
+    inner = 2000
+    maxiter = 30000
     b1 = .9
     b2 = .999
     eps = 1e-8

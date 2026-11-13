@@ -264,9 +264,10 @@ class spinn:
         iterations, with the best weights so far).
 
         'maxiter' limits the total number of optimizer iterations (default
-        15000). The weights are returned in 'res.lmbd', the unweighted terms
-        in 'res.terms'; 'res.fun' is the weighted loss, 'res.nouter' the
-        number of optimizer runs.
+        from the optimizer: 15000, 30000 for 'adam'). The weights are
+        returned in 'res.lmbd', the unweighted terms in 'res.terms';
+        'res.fun' is the weighted loss, 'res.nouter' the number of optimizer
+        runs.
         """
         if hasattr(self, 'loss'):
             if type(self).terms is spinn.terms:
@@ -293,7 +294,7 @@ class spinn:
             opt.kwargs = dict(opt.kwargs or {}, **kwargs)
         b = copy.deepcopy(balancing.get(balance))  # state of this training
         if maxiter is None:
-            maxiter = 15000  # scipy's default for L-BFGS-B
+            maxiter = opt.maxiter
 
         def terms(w):
             return np.asarray(self._terms(w, *args), np.float64)
@@ -309,10 +310,11 @@ class spinn:
         dtype = jnp.asarray(self.w).dtype
         if len(terms(w)) < 2:
             b = balancing.fixed()  # one term, nothing to balance
+        inner = opt.inner if b.inner is None else b.inner
         lmbd = weights(w, None)
         nit = nfev = k = short = 0
         while True:
-            n = int(min(b.inner, maxiter - nit))
+            n = int(min(inner, maxiter - nit))
             res = run(w, lmbd, n)
             w = res.x
             nit += res.nit

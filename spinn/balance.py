@@ -2,7 +2,8 @@
 Balancing of loss terms, used by 'spinn.train' (argument 'balance').
 
 A balancer returns the weights 'lmbd' of the loss terms, sum(lmbd * terms).
-'train' runs the optimizer for 'inner' iterations with fixed weights, then
+'train' runs the optimizer for 'inner' iterations (500 for lbfgs, 2000 for
+adam, see 'spinn.optimize') with fixed weights, then
 asks the balancer for new ones, and repeats this until the weights settle
 (the optimizer converged and no weight changed by more than 10%), two
 optimizer runs in a row make less than 10 iterations (nothing left to
@@ -144,10 +145,11 @@ class balancer:
     """
     Base class of balancers. Options:
 
-        inner - optimizer iterations between weight updates (default 500)
+        inner - optimizer iterations between weight updates (default None:
+                the optimizer's, 500 for lbfgs and minimize, 2000 for adam)
         outer - maximum number of weight updates (default unlimited)
     """
-    inner = 500
+    inner = None
     outer = np.inf
 
     def __init__(self, **options):
