@@ -6,7 +6,8 @@ A monitor records terms, loss, lambdas and own metrics during training
 (every 100 iterations for L-BFGS, 500 for Adam, and at each lambda update),
 together with the settings and results of each training. One monitor can
 record several trainings, e.g. to compare optimizers or balancers, and with
-'seeds' it records every seed.
+'seeds' it records every seed. A training stopped early (here by its
+iteration limit) is continued by 'resume', and its monitor records on.
 """
 import jax.numpy as jnp
 from spinn import hcube, mlgraph, monitor
@@ -51,6 +52,17 @@ if __name__ == "__main__":
             k, hs['err'][hs['seed'] == k][-1],
             '  <- kept (lowest loss)' if k == r.seed else ''))
 
+    # 3. Adam with 10000 iterations, then 20000 more by 'resume': it ends
+    # where the training of part 1 with 30000 iterations at once ended
+    B = beam(mlgraph((1, 32, 1)), initx=x, key=1)
+    ra = B.train(x, q, bx, EI, method='adam', balance='curvsens',
+                 maxiter=10000, monitor=monitor(metrics={'err': err}))
+    print('%-34s error %.1e' % ('adam, 10000 iterations:', err(B)))
+    ra = B.resume(ra, maxiter=20000)
+    print('%-34s error %.1e' % ('resumed, 30000 iterations:', err(B)))
+    print('%-34s error %.1e' % ('part 1, 30000 iterations at once:',
+                                h['err'][h['train'] == 3][-1]))
+
     #
     # Plots
     import matplotlib.pyplot as plt
@@ -64,5 +76,7 @@ if __name__ == "__main__":
     m.compare('err', x='it', ax=ax[1])
     # the seeds
     r.monitor.compare('err', x='it')
+    # the resumed training: one history, the red dash-dot line is the resume
+    ra.monitor.plot(labels=['equation', 'deflection BC', 'slope BC'])
 
     plt.show()
