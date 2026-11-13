@@ -28,7 +28,9 @@ attributes, which can be changed per instance:
 between updates (every training starts afresh). A balancer with
 several phases moves to the next one in 'advance': when 'train' would
 stop by the rules above (weights settled, short runs) it calls 'advance'
-and goes on if it returns True.
+and goes on if it returns True. With an 'anytime' optimizer (e.g. adam,
+whose runs do not converge) settled weights are enough to advance, and the
+last phase runs until 'maxiter'.
 
 In 'train' a balancer is given by name or expression (see below), class
 (curv), instance (curv(lmax=1e3)), as a sequence of fixed weights or None

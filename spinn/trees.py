@@ -334,15 +334,21 @@ class spinn:
                 break
             # no progress
             done = res.nit == 0 or short >= 2
+            settled = False
             if not done:
                 new = weights(w, lmbd)
+                settled = np.max(np.abs(new/lmbd - 1.)) < 0.1
                 # converged and weights settled
-                done = res.success and np.max(np.abs(new/lmbd - 1.)) < 0.1
-            if done:
-                if not b.advance():  # next phase of the balancer, if any
+                done = res.success and settled
+            # an 'anytime' optimizer (e.g. adam, its runs do not converge)
+            # moves to the next phase once the weights settle, and in the
+            # last phase goes on
+            if done or (settled and opt.anytime):
+                if b.advance():  # next phase of the balancer, if any
+                    short = 0
+                    new = weights(w, lmbd)
+                elif done:
                     break
-                short = 0
-                new = weights(w, lmbd)
             lmbd = new
         self.w = jnp.asarray(w)
         res.nit, res.nfev, res.nouter = nit, nfev, k

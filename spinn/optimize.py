@@ -48,10 +48,15 @@ class optimizer:
     """
     Base class of optimizers. Options:
 
-        tol - tolerance of the stop criteria (meaning depends on the
-              optimizer)
+        tol     - tolerance of the stop criteria (meaning depends on the
+                  optimizer)
+        anytime - True for optimizers whose runs do not converge but improve
+                  for as long as they run (e.g. adam): 'train' moves to the
+                  next phase of the balancer once the weights settle, not
+                  only after a converged run (default False)
     """
     tol = None
+    anytime = False
 
     def __init__(self, **options):
         for k, v in options.items():
@@ -302,12 +307,16 @@ class adam(_optax):
         patience - the run stops after this many steps in a row without
                    improvement (default None, no stop)
         chunk    - iterations between calls of 'callback' (default 100)
+        anytime  - (default True) see 'optimizer'; e.g. 'curvsens' moves to
+                   sensitivities once the curv weights settle, and the last
+                   phase runs until 'maxiter'
 
     The moments start from zero in each run (the scale of the loss changes
     with the weights of the terms); the schedule counts on. The best weights
     of the run are returned.
     """
     lr = 1e-3
+    anytime = True
     b1 = .9
     b2 = .999
     eps = 1e-8

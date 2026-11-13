@@ -602,6 +602,33 @@ class TestOptimize:
                     maxiter=500)
         assert r.status == 0 and r.nit < 500
 
+    def test_anytime(self):
+        # adam's runs do not converge: settled weights move to the next
+        # phase, and the last phase runs until maxiter
+        x, t = data()
+        calls = []
+
+        class const(balance.balancer):
+            def __init__(self, v, **options):
+                super().__init__(**options)
+                self.v = v
+
+            def __call__(self, model, w, lmbd, *args):
+                calls.append(self.v[1])
+                return self.v
+        b = balance.phases(const([1., 2.]), const([1., 5.]), inner=20)
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r = N.train(x, t, method='adam', maxiter=200, balance=b)
+        assert calls[:2] == [2., 2.] and set(calls[2:]) == {5.}
+        assert r.nit == 200 and r.nouter == 10
+        np.testing.assert_allclose(r.lmbd, [1., 5.])
+        # not anytime: no run converges, the first phase is kept
+        calls.clear()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r = N.train(x, t, method=optimize.adam(anytime=False), maxiter=200,
+                    balance=b)
+        assert set(calls) == {2.} and r.nit == 200
+
     def test_adam_schedule(self):
         # the schedule counts the iterations of the whole training, the
         # instance passed to train is not changed
