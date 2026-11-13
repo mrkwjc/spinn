@@ -10,8 +10,11 @@
   on the GPU, with equal or better accuracy. `method='L-BFGS-B'` gives the
   previous behaviour. scipy's arguments (`options`, `bounds`, ...) need a
   scipy method; with `'lbfgs'` they raise a `TypeError`. `callback` is
-  called every 100 iterations (option `chunk`) with the best weights so far.
+  called every 100 iterations (option `chunk`) with the best network weights
+  so far.
 - **optax** is a new dependency.
+- **Wording:** the weights of the loss terms (`lmbd`) are called *lambdas*
+  in the documentation; *weights* are those of the network.
 
 ### Added
 
@@ -20,21 +23,21 @@
   `adam` (Adam of optax on the device; learning rate `lr`, a number or a
   schedule over the whole training, e.g. `adam(lr=1e-2)`; its runs do not
   converge, so balancers with phases, e.g. `'curvsens'`, move on once the
-  weights settle: option `anytime` of the optimizers; by default it runs
-  2000 iterations between weight updates and 30000 in all),
+  lambdas settle: option `anytime` of the optimizers; by default it runs
+  2000 iterations between lambda updates and 30000 in all),
   `minimize` (any scipy method, e.g. `minimize(method='BFGS', tol=1e-8)`),
   and your own optimizer as a subclass of `spinn.optimize.optimizer`.
   `method` accepts a name, a class or an instance. The optimizer sets the
   defaults of `maxiter` and of the balancer's `inner` (`balancer.inner` is
   now `None`, meaning the optimizer's).
-- **Best of several initial weights:** `train(..., seeds=3)` (or a list of
-  seeds) trains from each and keeps the training with the lowest loss;
-  `res.seed`, `res.seeds` and `res.scores` report them.
+- **Best of several initial network weights:** `train(..., seeds=3)` (or a
+  list of seeds) trains from each and keeps the training with the lowest
+  loss; `res.seed`, `res.seeds` and `res.scores` report them.
 
 ### Fixed
 
-- `'sens'` weights when a term is exactly zero (in float32): the other
-  weights went to the cap, 1e12, and training failed (`'curvsens'` on the
+- `'sens'` lambdas when a term is exactly zero (in float32): the other
+  lambdas went to the cap, 1e12, and training failed (`'curvsens'` on the
   cantilever example).
 
 ## 0.3.0 (2026-11-11)

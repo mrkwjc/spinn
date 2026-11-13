@@ -84,7 +84,7 @@ if __name__ == "__main__":
 
     G = mlgraph((1, 32, 1))
     B = cantilever(G, initx=x)
-    # weights of the terms are balanced automatically (balance='curv')
+    # lambdas (term weights) are balanced automatically (balance='curv')
     B.train(x, q, bx, EI, Fmin, tol=1e-10, maxiter=10000)
 
     F, dFx, dFxx, dFxxx, dFxxxx = B.propx([[x, 0],

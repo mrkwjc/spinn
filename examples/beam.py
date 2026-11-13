@@ -63,7 +63,7 @@ if __name__ == "__main__":
 
     G = mlgraph((1, 32, 1))
     B = beam(G, initx=x)
-    B.train(x, q, bx, EI)  # weights of the terms balanced automatically
+    B.train(x, q, bx, EI)  # lambdas (term weights) balanced automatically
 
     # Compare with theoretical solution
     names = ['F', 'dFx', 'dFxx', 'dFxxx', 'dFxxxx']

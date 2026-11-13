@@ -1,15 +1,16 @@
 """
 Balancing of loss terms, used by 'spinn.train' (argument 'balance').
 
-A balancer returns the weights 'lmbd' of the loss terms, sum(lmbd * terms).
+A balancer returns the weights of the loss terms, the lambdas 'lmbd' in
+sum(lmbd * terms) ('weights' alone are the weights of the network).
 'train' runs the optimizer for 'inner' iterations (500 for lbfgs, 2000 for
-adam, see 'spinn.optimize') with fixed weights, then
-asks the balancer for new ones, and repeats this until the weights settle
-(the optimizer converged and no weight changed by more than 10%), two
-optimizer runs in a row make less than 10 iterations (nothing left to
-gain), after 'outer' updates or when 'maxiter' is used up. (When the
-optimizer has converged, further updates hardly change the weights and
-only restart it, so a stricter stop costs time without gaining accuracy.)
+adam, see 'spinn.optimize') with fixed lambdas, then asks the balancer for
+new ones, and repeats this until the lambdas settle (the optimizer
+converged and no lambda changed by more than 10%), two optimizer runs in a
+row make less than 10 iterations (nothing left to gain), after 'outer'
+updates or when 'maxiter' is used up. (When the optimizer has converged,
+further updates hardly change the lambdas and only restart it, so a
+stricter stop costs time without gaining accuracy.)
 
 Own rules subclass 'balancer' and define '__call__'; options are class
 attributes, which can be changed per instance:
@@ -18,27 +19,27 @@ attributes, which can be changed per instance:
         p = 2.
         def __call__(self, model, w, lmbd, *args):
             T = model._terms(w, *args)   # values of the terms (jax array)
-            return ...                   # one weight per term
+            return ...                   # one lambda per term
 
-'lmbd' are the weights used in the loss so far (None at the first call),
-'args' the arguments of 'terms'.
+'w' are the network weights, 'lmbd' the lambdas used in the loss so far
+(None at the first call), 'args' the arguments of 'terms'.
 
     B.train(*args, balance=mine(p=3., inner=500))
 
 'train' works on a copy of the balancer, so a balancer may keep a state
 between updates (every training starts afresh). A balancer with
 several phases moves to the next one in 'advance': when 'train' would
-stop by the rules above (weights settled, short runs) it calls 'advance'
+stop by the rules above (lambdas settled, short runs) it calls 'advance'
 and goes on if it returns True. With an 'anytime' optimizer (e.g. adam,
-whose runs do not converge) settled weights are enough to advance, and the
+whose runs do not converge) settled lambdas are enough to advance, and the
 last phase runs until 'maxiter'.
 
 In 'train' a balancer is given by name or expression (see below), class
-(curv), instance (curv(lmax=1e3)), as a sequence of fixed weights or None
-(equal weights).
+(curv), instance (curv(lmax=1e3)), as a sequence of fixed lambdas or None
+(equal lambdas).
 
 Rules: 'curv' (the default), 'grad' and 'sens'. They combine into
-expressions written as in Python: '*' multiplies weights, '**' raises them
+expressions written as in Python: '*' multiplies lambdas, '**' raises them
 to a number, and a comma separates phases (the next rule takes over when
 'train' would stop with the previous one):
 
@@ -46,7 +47,7 @@ to a number, and a comma separates phases (the next rule takes over when
     'curv, curv**.5*sens' - curv, then sqrt(curv)*sens (most accurate so
                             far, typically at 1.1-1.6 times the cost of
                             curv); shortcut 'curvsens'
-    'curv, sens'          - curv, then pure sensitivity weights
+    'curv, sens'          - curv, then pure sensitivity lambdas
 
 Each name in an expression is a new instance with default options; with
 other options build the balancers: phases(curv(), product((curv(), .5),
@@ -129,8 +130,8 @@ def _like(model, a):
 
 def _ratios(v, r, zero, lmax):
     """
-    Weights v[r]/v[i] from term measures 'v' with term r as the reference
-    (weight 1); terms with v[i] = 0 get 'zero'. Weights are kept between
+    Lambdas v[r]/v[i] from term measures 'v' with term r as the reference
+    (lambda 1); terms with v[i] = 0 get 'zero'. Lambdas are kept between
     1 and 'lmax'.
     """
     v = np.asarray(v, np.float64)
@@ -145,9 +146,9 @@ class balancer:
     """
     Base class of balancers. Options:
 
-        inner - optimizer iterations between weight updates (default None:
+        inner - optimizer iterations between lambda updates (default None:
                 the optimizer's, 500 for lbfgs and minimize, 2000 for adam)
-        outer - maximum number of weight updates (default unlimited)
+        outer - maximum number of lambda updates (default unlimited)
     """
     inner = None
     outer = np.inf
@@ -160,9 +161,9 @@ class balancer:
             setattr(self, k, v)
 
     def __call__(self, model, w, lmbd, *args):
-        """Weights of the loss terms (one per term), from the network
-        weights 'w', the loss weights so far 'lmbd' (None at the start) and
-        the arguments 'args' of 'terms'."""
+        """Lambdas, the weights of the loss terms (one per term), from the
+        network weights 'w', the lambdas so far 'lmbd' (None at the start)
+        and the arguments 'args' of 'terms'."""
         raise NotImplementedError
 
     def advance(self):
@@ -179,11 +180,11 @@ class balancer:
 
 def onesided(v, lmax):
     """
-    One-sided weights from term measures 'v' (values, gradient norms):
+    One-sided lambdas from term measures 'v' (values, gradient norms):
     lmbd[i] = max(1, v[0]/v[i]), capped at 'lmax'. Terms are only weighted
-    up relative to the first (reference) term; two-sided weights fail when
+    up relative to the first (reference) term; two-sided lambdas fail when
     a term is nearly satisfied at some point (e.g. a contact condition
-    before contact): its tiny measure gives it a huge weight and the other
+    before contact): its tiny measure gives it a huge lambda and the other
     terms are neglected.
     """
     return _ratios(v, 0, lmax, lmax)
@@ -194,7 +195,7 @@ class grad(balancer):
     lmbd[i] = max(1, |grad terms[0]|/|grad terms[i]|), so that no term
     pulls the network weaker than the reference (Wang et al. 2021,
     "learning rate annealing", here between optimizer runs). Option
-    'lmax' - maximum weight (default 1e6).
+    'lmax' - maximum lambda (default 1e6).
     """
     lmax = 1e6
 
@@ -211,14 +212,14 @@ class curv(balancer):
 
         lmbd[i] = h[r]/h[i],   r = argmax(h),
 
-    where h[i] = |trace of the Hessian of terms[i]| w.r.t. the weights,
-    estimated from 'probes' random +-1 vectors v (Hutchinson, v.H.v as
-    second directional derivatives, no Hessian is formed). Weights are
-    capped at 'lmax'; the cap is high, as terms of fields of very different
-    size (multiphysics) may need weights of 1e10 and more. A term with zero
-    curvature (independent of the weights, e.g. at a point not reached by
-    the network) gets weight 1. Options: 'probes' (default 4), 'lmax'
-    (default 1e12), 'seed' of the probes (default 0).
+    where h[i] = |trace of the Hessian of terms[i]| w.r.t. the network
+    weights, estimated from 'probes' random +-1 vectors v (Hutchinson,
+    v.H.v as second directional derivatives, no Hessian is formed).
+    Lambdas are capped at 'lmax'; the cap is high, as terms of fields of
+    very different size (multiphysics) may need lambdas of 1e10 and more. A
+    term with zero curvature (independent of the network weights, e.g. at a
+    point not reached by the network) gets lambda 1. Options: 'probes'
+    (default 4), 'lmax' (default 1e12), 'seed' of the probes (default 0).
     """
     lmax = 1e12
     probes = 4
@@ -268,17 +269,17 @@ def cg(hv, B, maxcg=50, tol=1e-6):
 
 class sens(balancer):
     """
-    Weights from the sensitivity of the solution to each term:
+    Lambdas from the sensitivity of the solution to each term:
 
         dw[i] = -H^-1 lmbd[i] grad terms[i],    du[i] = (du/dw) dw[i]
-        s[i]  = |du[i]| / sqrt(terms[i]),       weights ~ s
+        s[i]  = |du[i]| / sqrt(terms[i]),       lambdas ~ s
 
     dw[i] is the change of the network weights which would remove the
     residual of term i (Newton step of the weighted loss sum(lmbd*terms)),
     du[i] the resulting change of the solution at the points args[0]; s[i]
     is the solution change per unit residual. H is damped by damp*(its
     largest eigenvalue) and the systems are solved by 'maxcg' conjugate
-    gradient iterations without forming H. 'lmbd' are the weights used in
+    gradient iterations without forming H. 'lmbd' are the lambdas used in
     the loss so far (equal if None).
 
     args[0] is the domain: an array (all outputs at all points) or a tuple
@@ -286,11 +287,11 @@ class sens(balancer):
     piecewise models). With several outputs their changes are scaled by
     the RMS of each output (scale='rms') or not ('none'). log(s) is
     averaged over the updates with avg='ema' (weight 1/2 to the new value)
-    or not ('none'). The smallest weight is 1, weights are capped at
+    or not ('none'). The smallest lambda is 1, lambdas are capped at
     'lmax'. A term at exactly zero has no sensitivity (zero gradient) and
-    keeps its previous weight.
+    keeps its previous lambda.
 
-    The terms most able to move the solution get the most weight: e.g.
+    The terms most able to move the solution get the largest lambdas: e.g.
     Dirichlet conditions, which set the solution, above Neumann ones. The
     sensitivities are meaningful for a network already trained, and in
     physical units the Hessian of plainly weighted terms is beyond float32;
@@ -364,7 +365,7 @@ class sens(balancer):
 
 class product(balancer):
     """
-    Product of powers of the weights of other balancers (parts: pairs
+    Product of powers of the lambdas of other balancers (parts: pairs
     (balancer, a) or balancers, a = 1),
 
         lmbd = prod(b(...)**a for b, a in parts),
@@ -406,7 +407,7 @@ class phases(balancer):
 
 
 class fixed(balancer):
-    """Fixed weights 'lmbd' (equal if None), single optimizer run."""
+    """Fixed lambdas 'lmbd' (equal if None), single optimizer run."""
     inner = np.inf
     outer = 1
 
@@ -420,7 +421,7 @@ class fixed(balancer):
             return np.ones(n)
         lm = np.ravel(np.asarray(self.lmbd, np.float64))
         if len(lm) != n:
-            raise ValueError("%d weights given for %d terms" % (len(lm), n))
+            raise ValueError("%d lambdas given for %d terms" % (len(lm), n))
         return lm
 
 
@@ -477,7 +478,7 @@ def parse(expr):
 
 
 def get(b):
-    """Balancer instance from name or expression, class, instance, weights
+    """Balancer instance from name or expression, class, instance, lambdas
     or None."""
     if b is None:
         return fixed()

@@ -226,13 +226,14 @@ class spinn:
 
             sum(lmbd * terms)
 
-        The weights 'lmbd' are set by the balancer 'balance' (see module
-        'spinn.balance'): the optimizer runs 'inner' iterations with fixed
-        weights, then the weights are updated and this is repeated. By
-        default ('curv') the terms are weighted to equal curvature, with
-        the stiffest term as the reference; 'grad' weights them to equal
-        gradient norms relative to the first term (put the equation
-        first). 'balance' is
+        The weights of the terms, the lambdas 'lmbd', are set by the
+        balancer 'balance' (see module 'spinn.balance'; 'weights' alone are
+        the weights of the network): the optimizer runs 'inner' iterations
+        with fixed lambdas, then the lambdas are updated and this is
+        repeated. By default ('curv') the terms are weighted to equal
+        curvature, with the stiffest term as the reference; 'grad' weights
+        them to equal gradient norms relative to the first term (put the
+        equation first). 'balance' is
 
             name     - balancer from spinn.balance with default options:
                        'curv' (default), 'grad', 'sens', or an expression
@@ -241,13 +242,13 @@ class spinn:
                        see spinn.balance)
             class    - balancer class (default options)
             instance - balancer with own options, e.g. curv(lmax=1e3)
-            sequence - fixed weights, one per term
-            None     - equal weights, i.e. plain sum of terms
+            sequence - fixed lambdas, one per term
+            None     - equal lambdas, i.e. plain sum of terms
 
         With one term balancing does nothing, so a single term returned by
         'terms' (combined in any way) is minimized as is.
 
-        'disp' prints the terms, the weights and the number of iterations
+        'disp' prints the terms, the lambdas and the number of iterations
         after each optimizer run (with a scipy method, scipy's own output,
         where supported, is switched on with options={'disp': True}).
 
@@ -264,14 +265,14 @@ class spinn:
         iterations, with the best weights so far).
 
         'maxiter' limits the total number of optimizer iterations (default
-        from the optimizer: 15000, 30000 for 'adam'). The weights are
+        from the optimizer: 15000, 30000 for 'adam'). The lambdas are
         returned in 'res.lmbd', the unweighted terms in 'res.terms';
         'res.fun' is the weighted loss, 'res.nouter' the number of optimizer
         runs.
 
-        'seeds' trains from several initial weights and keeps the best: a
-        number of random seeds or a list of seeds (see 'initw'). Each seed
-        gets new weights and a whole training (fresh balancer and
+        'seeds' trains from several initial network weights and keeps the
+        best: a number of random seeds or a list of seeds (see 'initw').
+        Each seed gets new weights and a whole training (fresh balancer and
         optimizer, 'maxiter' each); the network keeps the training with the
         lowest 'res.fun' and its result is returned, with 'res.seed' (the
         seed kept), 'res.seeds' and 'res.scores' (res.fun of each); the
@@ -321,7 +322,7 @@ class spinn:
             lmbd = jnp.asarray(lmbd, dtype)
             return opt(self, w, lmbd, *args, n=n, callback=callback)
 
-        def weights(w, current):  # current - weights in the loss so far
+        def lambdas(w, current):  # current - lambdas in the loss so far
             return np.asarray(b(self, w, current, *args), np.float64)
 
         w = np.asarray(self.w, dtype=np.float64)
@@ -329,7 +330,7 @@ class spinn:
         if len(terms(w)) < 2:
             b = balancing.fixed()  # one term, nothing to balance
         inner = opt.inner if b.inner is None else b.inner
-        lmbd = weights(w, None)
+        lmbd = lambdas(w, None)
         nit = nfev = k = short = 0
         last = False  # the balancer has no next phase ('advance' said so)
         while True:
@@ -346,28 +347,28 @@ class spinn:
                          np.array2string(terms(w), formatter=fmt),
                          np.array2string(lmbd, formatter=fmt)))
             # (almost) no progress twice in a row: line search failed, or
-            # the weights keep changing while the optimizer has nothing left
-            # to do (once is not enough, a run with poor weights can stop
-            # early and the next weights recover)
+            # the lambdas keep changing while the optimizer has nothing left
+            # to do (once is not enough, a run with poor lambdas can stop
+            # early and the next lambdas recover)
             short = short + 1 if res.nit < min(10, n) else 0
-            # stopped by callback, out of iterations or of weight updates
+            # stopped by callback, out of iterations or of lambda updates
             if res.status == 99 or nit >= maxiter or k >= b.outer:
                 break
             # no progress
             done = res.nit == 0 or short >= 2
             settled = False
             if not done:
-                new = weights(w, lmbd)
+                new = lambdas(w, lmbd)
                 settled = np.max(np.abs(new/lmbd - 1.)) < 0.1
-                # converged and weights settled
+                # converged and lambdas settled
                 done = res.success and settled
             # an 'anytime' optimizer (e.g. adam, its runs do not converge)
-            # moves to the next phase once the weights settle, and in the
+            # moves to the next phase once the lambdas settle, and in the
             # last phase goes on
             if done or (settled and opt.anytime and not last):
                 if not last and b.advance():  # next phase, if any
                     short = 0
-                    new = weights(w, lmbd)
+                    new = lambdas(w, lmbd)
                 elif done:
                     break
                 else:  # never asked again: 'advance' returns False once

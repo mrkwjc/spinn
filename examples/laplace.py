@@ -63,7 +63,7 @@ if __name__ == "__main__":
     x = hcube((L, B), n=n)
     bx = left(x), right(x), bottom(x), top(x)
     q = B/2 * (1 - jnp.cos(jnp.pi * bx[1][:, 1] / B))
-    # Fixed weights of the terms: the Dirichlet conditions (left, right)
+    # Fixed lambdas (term weights): the Dirichlet conditions (left, right)
     # are weighted up. This is about 1.5x more accurate here than the
     # automatic balancing (the default, balance='curv'), which can be
     # tried by removing the 'balance' argument below

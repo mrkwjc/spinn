@@ -59,7 +59,7 @@ if __name__ == "__main__":
 
     G = mlgraph((2, 16, 16, 1))
     PDE = heat(G, initx=x)
-    PDE.train(x, a, f0, bx)  # weights of the terms balanced automatically
+    PDE.train(x, a, f0, bx)  # lambdas (term weights) balanced automatically
 
     F = PDE(x).T[0]
     Fe = exact(x, a, L)

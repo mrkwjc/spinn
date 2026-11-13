@@ -26,7 +26,7 @@ class plate(spinn):
 
     In physical units the loss terms differ by orders of magnitude (the
     residual is in K/m**2, the cooled edge in K, the heat flux in W/m**2),
-    so with equal weights the network does not find the solution at all.
+    so with equal lambdas the network does not find the solution at all.
     Automatic balancing of the terms (the default in 'train') weights them
     to equal curvature and gives about 0.1% error in float32 within
     seconds (about 1% with balance='grad'). Nondimensional variables (e.g.
@@ -78,8 +78,8 @@ if __name__ == "__main__":
 
     G = mlgraph((2, 16, 16, 1))
     P = plate(G, initx=x)
-    res = P.train(x, bx, k, T0, q)  # weights of the terms balanced
-    print('Weights of the terms:', res.lmbd)
+    res = P.train(x, bx, k, T0, q)  # lambdas (term weights) balanced
+    print('Lambdas (term weights):', res.lmbd)
 
     # Compare with the exact solution on a finer grid
     m = 101

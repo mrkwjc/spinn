@@ -2,8 +2,9 @@
 Optimizers, used by 'spinn.train' (argument 'method').
 
 An optimizer minimizes the loss for a given number of iterations, starting
-from the given weights. 'train' calls it once per weight update of the
-balancer (see 'spinn.balance'), with the loss weights fixed during the run.
+from the given network weights. 'train' calls it once per update of the
+lambdas (the weights of the loss terms, see 'spinn.balance'), which are
+fixed during the run.
 
     lbfgs    - L-BFGS of optax, on the device of the network (default)
     adam     - Adam of optax, on the device of the network
@@ -52,9 +53,9 @@ class optimizer:
                   optimizer)
         anytime - True for optimizers whose runs do not converge but improve
                   for as long as they run (e.g. adam): 'train' moves to the
-                  next phase of the balancer once the weights settle, not
+                  next phase of the balancer once the lambdas settle, not
                   only after a converged run (default False)
-        inner   - default iterations between weight updates of the
+        inner   - default iterations between lambda updates of the
                   balancer, used if the balancer does not set them (500)
         maxiter - default of 'maxiter' of 'train', the total number of
                   iterations (15000)
@@ -74,11 +75,11 @@ class optimizer:
     def __call__(self, model, w, lmbd, *args, n, callback=None):
         """Minimize the loss of 'model', model._loss(w, lmbd, *args), over
         the flat network weights 'w' for at most 'n' iterations, starting
-        from 'w' (numpy float64); 'lmbd' (weights of the terms, in the
-        precision of the network) and 'args' (arguments of 'terms') are
-        fixed. Return a scipy OptimizeResult with at least 'x', 'fun',
-        'nit', 'nfev', 'status' (99 if stopped by 'callback') and
-        'success'."""
+        from 'w' (numpy float64); 'lmbd' (lambdas, the weights of the
+        terms, in the precision of the network) and 'args' (arguments of
+        'terms') are fixed. Return a scipy OptimizeResult with at least
+        'x', 'fun', 'nit', 'nfev', 'status' (99 if stopped by 'callback')
+        and 'success'."""
         raise NotImplementedError
 
     def __repr__(self):
@@ -314,15 +315,15 @@ class adam(_optax):
                    improvement (default None, no stop)
         chunk    - iterations between calls of 'callback' (default 100)
         anytime  - (default True) see 'optimizer'; e.g. 'curvsens' moves to
-                   sensitivities once the curv weights settle, and the last
+                   sensitivities once the curv lambdas settle, and the last
                    phase runs until 'maxiter'
-        inner    - iterations between weight updates (default 2000, if the
+        inner    - iterations between lambda updates (default 2000, if the
                    balancer does not set them)
         maxiter  - default of 'maxiter' of 'train' (30000; Adam needs more
                    iterations than L-BFGS)
 
     The moments start from zero in each run (the scale of the loss changes
-    with the weights of the terms); the schedule counts on. The best weights
+    with the lambdas); the schedule counts on. The best weights
     of the run are returned.
     """
     lr = 1e-3
