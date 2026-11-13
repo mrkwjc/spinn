@@ -1,6 +1,16 @@
 # spinn - Simple Physics Informed Neural Networks
 Makes PINNs easy (with jax), see examples...
 
+## Installation
+
+```
+pip install spinn
+```
+
+spinn runs on the CPU as installed; for an NVIDIA GPU install jax with CUDA
+first (`pip install -U "jax[cuda12]"`, see the jax documentation). Training
+runs on the GPU without copies to the host, so it pays off there.
+
 ## Usage
 
 Subclass `spinn` and define `terms`: the loss terms of the problem, with the
@@ -38,19 +48,37 @@ res = P.train(x, 0.2, f0, bx)
 F = P(x)                                    # solution at the points
 ```
 
-`train` minimizes the weighted sum of the terms with L-BFGS (of optax, run on
-the GPU or CPU without copies to the host; `method='L-BFGS-B'` and other
-scipy methods are available too). The weights of the terms, the lambdas,
-are balanced automatically (`balance='curv'` by default, see `spinn.balance`
-for the other rules, e.g. `balance='curvsens'`), or given explicitly as
+`train` minimizes the weighted sum of the terms. The weights of the terms,
+the lambdas, are balanced automatically (`balance='curv'` by default, see
+`spinn.balance` for the other rules), or given explicitly as
 `balance=[1., 10., 10.]`. The final lambdas are returned in `res.lmbd` and
-the unweighted terms in `res.terms`. With `seeds=3` the network is trained
-from three random initial weights and the best training is kept (`res.seed`
-reproduces it).
+the unweighted terms in `res.terms`.
+
+The optimizer is L-BFGS of optax by default (`method='lbfgs'`), run on the
+GPU or CPU without copies to the host. `method='adam'` uses Adam (30000
+iterations by default; slower, sometimes more accurate), and scipy methods
+are available by name, e.g. `method='L-BFGS-B'`. Optimizers with own options
+are instances (`from spinn import optimize`, then
+`method=optimize.adam(lr=1e-2)`); see `help(optimize)`.
 
 Activations of the hidden layers are set with `f`: a name from `jax.nn` or
 `jax.numpy` (`f='tanh'`, `f='sin'`, `f='gelu'`; softplus by default), a
 function, or one per layer. Networks are saved with `P.dump(fname)` and
 restored with `heat.load(fname)`; see `help(spinn)` for details.
 
-More problems (beams, Laplace and heat equations) are in `examples/`.
+## Accuracy
+
+Two options lower the error at a higher cost:
+
+- `balance='curvsens'`: curvature lambdas corrected by the sensitivity of
+  the solution to each term; often more accurate, at about 1.5 times the
+  cost.
+- `seeds=3`: training from three random initial weights, the best is kept
+  (`res.seed` reproduces it); lowered the median error 1.3-5 times on the
+  examples and removed most bad runs, at 3 times the cost.
+
+## Examples
+
+More problems are in `examples/`: beams (with a support, and a cantilever),
+the heat equation, a heated plate in physical units and the Laplace
+equation, all compared with exact solutions.
