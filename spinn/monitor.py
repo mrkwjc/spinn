@@ -70,6 +70,36 @@ import time
 import numpy as np
 
 __all__ = ['monitor']
+
+
+def _grid(ax, grid):
+    """Light grid: True major lines, 'both' also minor, False none."""
+    if grid not in (True, False, 'both'):
+        raise ValueError("grid must be True, False or 'both'")
+    if grid:
+        ax.grid(True, which='major', color='0.85', lw=0.5)
+    if grid == 'both':
+        ax.minorticks_on()
+        ax.grid(True, which='minor', color='0.93', lw=0.4)
+    ax.set_axisbelow(True)
+
+
+_MARKERS = ('o', 's', '^', 'v', 'D', '<', '>', 'p', '*', 'h', 'X', 'P')
+
+
+def _markers(lines, kwargs, first=0):
+    """Default markers: a different one per line (from 'first' in the
+    cycle), small, at most about 25 per line; own 'marker', 'ms' (or
+    'markersize') and 'markevery' in kwargs win."""
+    for i, line in enumerate(lines):
+        if 'marker' not in kwargs:
+            line.set_marker(_MARKERS[(first + i) % len(_MARKERS)])
+        if 'ms' not in kwargs and 'markersize' not in kwargs:
+            line.set_markersize(3)
+        if 'markevery' not in kwargs:
+            line.set_markevery(max(1, len(line.get_xdata())//25))
+
+
 _COLUMNS = ('train', 'seed', 'it', 't', 'run', 'phase', 'end', 'loss',
             'terms', 'lmbd', 'w')
 
@@ -221,10 +251,18 @@ class monitor:
                 h[k] = np.array([r.get(k, np.nan) for r in self.rows])
         return h
 
-    def plot(self, train=None, x='it', fname=None):
+    def plot(self, train=None, x='it', labels=None, grid=True, fname=None,
+             **kwargs):
         """Terms, loss, lambdas and metrics of training 'train' (index,
         default the last one) against iterations (x='it') or time in seconds
-        (x='t'); saved to 'fname' if given."""
+        (x='t'). 'labels' names the terms (a list, one per term; default
+        'term i'). Each term has its own marker (also its lambda); own
+        'marker', 'ms' or 'markevery' apply to all curves. 'grid' draws a
+        light grid (True at the powers of ten, 'both' also between them,
+        False none); the dashed vertical lines are the lambda updates. Other
+        keyword arguments go to every curve (matplotlib, e.g. ls=':').
+        Saved to 'fname' if given; returns the figure (axes: terms, loss,
+        lambdas, metrics) to change further."""
         import matplotlib.pyplot as plt
         h = self.history
         if not h:
@@ -238,36 +276,46 @@ class monitor:
             raise ValueError("x must be 'it' or 't'")
         it = h[x][s]
         cols = ~np.all(np.isnan(h['terms'][s]), axis=0)  # its own terms
-        ax[0].semilogy(it, h['terms'][s][:, cols])
+        idx = np.flatnonzero(cols)
+        if labels is not None and len(labels) < h['terms'].shape[1]:
+            raise ValueError("%d labels for %d terms"
+                             % (len(labels), h['terms'].shape[1]))
+        _markers(ax[0].semilogy(it, h['terms'][s][:, cols], **kwargs),
+                 kwargs)
         ax[0].set_ylabel('terms')
-        ax[0].legend(['term %d' % i for i in np.flatnonzero(cols)],
-                     fontsize='small')
-        ax[1].semilogy(it, h['loss'][s])
+        ax[0].legend(['term %d' % i if labels is None else labels[i]
+                      for i in idx], fontsize='small')
+        _markers(ax[1].semilogy(it, h['loss'][s], **kwargs), kwargs)
         ax[1].set_ylabel('loss')
-        ax[2].semilogy(it, h['lmbd'][s][:, cols], drawstyle='steps-pre')
+        _markers(ax[2].semilogy(it, h['lmbd'][s][:, cols], **dict(
+            dict(drawstyle='steps-pre'), **kwargs)), kwargs)
         ax[2].set_ylabel('lambdas')
         for a, name in zip(ax[3:], names):
-            a.semilogy(it, np.abs(h[name][s]))
+            _markers(a.semilogy(it, np.abs(h[name][s]), **kwargs), kwargs)
             a.set_ylabel(name)
         ends = it[h['end'][s]]
         for a in ax:
-            for e in ends:
-                a.axvline(e, color='grey', lw=0.5, ls=':')
+            _grid(a, grid)
+            for e in ends:  # lambda updates
+                a.axvline(e, color='0.35', lw=0.8, ls='--')
         ax[-1].set_xlabel('iteration' if x == 'it' else 'time [s]')
         fig.tight_layout()
         if fname is not None:
             fig.savefig(fname)
         return fig
 
-    def compare(self, key='loss', x='t', trains=None, term=None, ax=None,
-                fname=None):
+    def compare(self, key='loss', x='t', trains=None, term=None,
+                labels=None, grid=True, ax=None, fname=None, **kwargs):
         """
         One curve per training: 'key' ('loss', a metric, or 'terms' or
         'lmbd' with the index 'term') against time in seconds (x='t') or
         iterations (x='it'), for the trainings 'trains' (indices, default
         all). The curves are labelled by what differs between the trainings
-        (method, balance, seed). Drawn into 'ax' if given, saved to 'fname'
-        if given; returns the figure.
+        (method, balance, seed), or by 'labels' (a list, one per training
+        shown). Each training has its own marker; 'grid' and own 'marker',
+        'ms' or 'markevery' as in 'plot'. Other keyword arguments go to every
+        curve (matplotlib, e.g. ls=':', marker='o'). Drawn into 'ax' if
+        given, saved to 'fname' if given; returns the figure.
         """
         import matplotlib.pyplot as plt
         h = self.history
@@ -297,13 +345,19 @@ class monitor:
                 v = info.get(i, {}).get(f)
                 parts.append('seed %s' % v if f == 'seed' else str(v))
             return ', '.join(parts) if parts else 'train %d' % i
+        if labels is not None and len(labels) != len(trains):
+            raise ValueError("%d labels for %d trainings"
+                             % (len(labels), len(trains)))
         if ax is None:
             fig, ax = plt.subplots(figsize=(6, 3.5))
         else:
             fig = ax.figure
-        for i in trains:
+        for j, i in enumerate(trains):
             s = h['train'] == i
-            ax.semilogy(h[x][s], np.abs(y[s]), label=label(i))
+            _markers(ax.semilogy(h[x][s], np.abs(y[s]), **dict(
+                kwargs, label=label(i) if labels is None else labels[j])),
+                kwargs, first=j)
+        _grid(ax, grid)
         ax.set_xlabel('iteration' if x == 'it' else 'time [s]')
         ax.set_ylabel(ylabel)
         ax.legend(fontsize='small')

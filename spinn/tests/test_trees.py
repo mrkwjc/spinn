@@ -835,6 +835,34 @@ class TestMonitor:
         assert [x.get_text() for x in fig.axes[0].get_legend().get_texts()] \
             == ['term 0']
         m.compare('terms', term=1)
+        # own labels and matplotlib options
+        fig = m.plot(train=0, labels=['fit', 'ends'], ls=':', marker='o')
+        assert [x.get_text() for x in fig.axes[0].get_legend().get_texts()] \
+            == ['fit', 'ends']
+        assert fig.axes[1].get_lines()[0].get_linestyle() == ':'
+        fig = m.compare('loss', labels=['a', 'b', 'c'], ls='--')
+        ax = fig.axes[0]
+        assert ax.get_legend_handles_labels()[1] == ['a', 'b', 'c']
+        assert ax.get_lines()[0].get_linestyle() == '--'
+        with pytest.raises(ValueError):
+            m.compare('loss', labels=['a'])
+        with pytest.raises(ValueError):
+            m.plot(train=0, labels=['fit'])
+        # default markers: one per curve (term and its lambda alike);
+        # an own marker applies to all
+        fig = m.plot(train=0)
+        mk = [ln.get_marker() for ln in fig.axes[0].get_lines()[:2]]
+        assert mk[0] != mk[1]
+        assert [ln.get_marker() for ln in fig.axes[2].get_lines()[:2]] == mk
+        ax = m.compare('loss').axes[0]
+        assert len({ln.get_marker() for ln in ax.get_lines()}) == 3
+        ax = m.compare('loss', marker='x').axes[0]
+        assert {ln.get_marker() for ln in ax.get_lines()} == {'x'}
+        for g in (False, 'both'):
+            m.plot(grid=g)
+            m.compare('loss', grid=g)
+        with pytest.raises(ValueError):
+            m.plot(grid='minor')
 
     def test_metrics_and_pickle(self):
         import pickle
