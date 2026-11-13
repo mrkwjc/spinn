@@ -17,6 +17,8 @@
 
 - **Optimizer classes** in the new module `spinn.optimize`, like the
   balancers: `lbfgs` (options `tol`, `patience`, `memory_size`, `chunk`),
+  `adam` (Adam of optax on the device; learning rate `lr`, a number or a
+  schedule over the whole training, e.g. `adam(lr=1e-2)`),
   `minimize` (any scipy method, e.g. `minimize(method='BFGS', tol=1e-8)`),
   and your own optimizer as a subclass of `spinn.optimize.optimizer`.
   `method` accepts a name, a class or an instance.

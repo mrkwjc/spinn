@@ -253,14 +253,15 @@ class spinn:
 
         'method' is an optimizer from spinn.optimize: 'lbfgs' (default;
         L-BFGS of optax, no copies to the host between iterations, so it is
-        fast on the GPU), a scipy method name (e.g. 'L-BFGS-B', 'BFGS'), an
-        optimizer class, or an instance with own options, e.g.
+        fast on the GPU), 'adam' (Adam of optax, also on the device), a
+        scipy method name (e.g. 'L-BFGS-B', 'BFGS'), an optimizer class, or
+        an instance with own options, e.g. spinn.optimize.adam(lr=1e-2) or
         spinn.optimize.minimize(method='BFGS', tol=1e-8).
         'tol' sets the tolerance of the optimizer (1e-10 by default). For
         scipy methods, the other keyword arguments ('options', 'bounds',
         ...) are passed to scipy.optimize.minimize. 'callback' is passed to
-        the optimizer ('lbfgs' calls it every 'chunk' = 100 iterations, with
-        the best weights so far).
+        the optimizer ('lbfgs' and 'adam' call it every 'chunk' = 100
+        iterations, with the best weights so far).
 
         'maxiter' limits the total number of optimizer iterations (default
         15000). The weights are returned in 'res.lmbd', the unweighted terms

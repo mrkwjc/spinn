@@ -586,6 +586,49 @@ class TestOptimize:
                         balance=balance.curv(inner=100))
         assert r.nouter > 1 and optimize._lbfgs_run._cache_size() == n
 
+    def test_adam(self):
+        x, t = data()
+        assert isinstance(optimize.get('Adam'), optimize.adam)
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        T0 = np.asarray(N._terms(N.w, x, t))
+        r = N.train(x, t, method=optimize.adam(lr=1e-2), maxiter=2000,
+                    balance=balance.curv(inner=500))
+        assert np.all(r.terms < 0.1*T0) and r.nit == 2000
+        # the best weights of the last run are kept
+        np.testing.assert_allclose(
+            N._loss(N.w, jnp.asarray(r.lmbd, N.w.dtype), x, t), r.fun,
+            rtol=1e-5)
+        r = N.train(x, t, method=optimize.adam(patience=3, lr=10.),
+                    maxiter=500)
+        assert r.status == 0 and r.nit < 500
+
+    def test_adam_schedule(self):
+        # the schedule counts the iterations of the whole training, the
+        # instance passed to train is not changed
+        x, t = data()
+        steps = []
+
+        def lr(k):
+            jax.debug.callback(steps.append, k)
+            return 1e-3
+        o = optimize.adam(lr=lr)
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r = N.train(x, t, method=o, maxiter=30,
+                    balance=balance.curv(inner=10))
+        assert r.nouter == 3 and o._k == 0
+        assert [int(k) for k in steps] == list(range(30))
+
+    def test_adam_compiles_once(self):
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        N.train(x, t, method='adam', maxiter=50)
+        n = optimize._adam_run._cache_size()
+        for key, lr in ((2, 1e-2), (3, 1e-3)):
+            N = fit2([1, 8, 1], f=jnp.tanh, key=key)
+            r = N.train(x, t, method=optimize.adam(lr=lr), maxiter=300,
+                        balance=balance.curv(inner=100))
+        assert r.nouter > 1 and optimize._adam_run._cache_size() == n
+
 
 def swish(x):       # module-level activation, saved by its dotted path
     return x*jax.nn.sigmoid(x)
