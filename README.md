@@ -76,6 +76,9 @@ m.history['terms']    # numpy arrays, one row per record
 m.plot()
 ```
 
+A training is continued with `res = P.resume(res, maxiter=5000)`: from where
+it stopped, with the state of its balancer and optimizer.
+
 ## Accuracy
 
 Two options lower the error at a higher cost:

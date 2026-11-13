@@ -16,24 +16,29 @@ own metrics. It also keeps the final network weights of each training.
 
 'history' has one entry per record (numpy arrays):
 
-    train - number of the training with this monitor (0, 1, ...)
-    seed  - seed of the training ('seeds' of train; -1 without)
-    it    - optimizer iterations since the start of the training
-    t     - seconds since the start of the training
-    run   - optimizer run (0 at the start; the lambdas change between runs)
-    phase - phase of the balancer (e.g. 0 curv, 1 sensitivities)
-    end   - True at the end of a run (a lambda update)
-    loss  - weighted loss, sum(lmbd * terms)
-    terms - unweighted terms (one column per term)
-    lmbd  - lambdas (one column per term)
-    w     - network weights (with keepw=True)
+    train  - number of the training with this monitor (0, 1, ...)
+    resume - 0, then 1, 2, ... after each 'resume' of the training (it
+             keeps its number, 'it' and 't' count on)
+    seed   - seed of the training ('seeds' of train; -1 without)
+    it     - optimizer iterations since the start of the training
+    t      - seconds since the start of the training (time of the
+             training itself, without pauses between resumes)
+    run    - optimizer run (0 at the start; the lambdas change between
+             runs)
+    phase  - phase of the balancer (e.g. 0 curv, 1 sensitivities)
+    end    - True at the end of a run (a lambda update)
+    loss   - weighted loss, sum(lmbd * terms)
+    terms  - unweighted terms (one column per term)
+    lmbd   - lambdas (one column per term)
+    w      - network weights (with keepw=True)
     and one entry per metric.
 
-'info' has one dict per training: 'train', 'seed', 'start' (date and
-time), 'method' and 'balance' (as given) with 'optimizer' and 'balancer'
-(all options), 'maxiter', 'inner' and 'every' (as used); at its end also
-'time' (seconds), 'nit', 'nouter', 'fun', 'status' and 'message' (missing
-if the training was interrupted).
+'info' has one dict per training and per resume: 'train', 'resume',
+'seed', 'start' (date and time), 'method' and 'balance' (as given) with
+'optimizer' and 'balancer' (all options), 'maxiter' (further iterations
+on a resume), 'inner' and 'every' (as used); at its end also 'time'
+(seconds of this call), 'nit' and 'nouter' (counted from the start of the
+training), 'fun', 'status' and 'message' (missing if interrupted).
 
 A monitor pickles as plain data: history, final weights, info and
 options. Metric functions are not kept (they may not pickle, or change
@@ -100,8 +105,8 @@ def _markers(lines, kwargs, first=0):
             line.set_markevery(max(1, len(line.get_xdata())//25))
 
 
-_COLUMNS = ('train', 'seed', 'it', 't', 'run', 'phase', 'end', 'loss',
-            'terms', 'lmbd', 'w')
+_COLUMNS = ('train', 'resume', 'seed', 'it', 't', 'run', 'phase', 'end',
+            'loss', 'terms', 'lmbd', 'w')
 
 
 class monitor:
@@ -131,9 +136,11 @@ class monitor:
 
     # --- called by train -------------------------------------------------
 
-    def _begin(self, model, args, opt, balancer, method, balance, **used):
-        """Start of a training: 'used' are the values train runs with
-        (maxiter, inner, every)."""
+    def _begin(self, model, args, opt, balancer, method, balance, resume=0,
+               train=None, **used):
+        """Start of a training ('resume' > 0: of its continuation; 'train'
+        its number if it goes on in this history): 'used' are the values
+        train runs with (maxiter, inner, every)."""
         if self.metrics:
             metrics = {}
             for name, f in self.metrics.items():
@@ -154,15 +161,23 @@ class monitor:
                                     "method name" % name)
                 metrics[name] = f
             self.metrics = metrics
-        self._ntrain += 1
-        self._t0 = time.time()
+        self._tstart = time.time()  # of this call (tmax, info 'time')
+        if train is None:  # a new training in the history
+            self._ntrain += 1
+            self._cur = self._ntrain
+            self._t0 = self._tstart
+        else:  # a resumed one: the same number, its time goes on
+            self._cur = train
+            t = [r['t'] for r in self.rows if r['train'] == train]
+            self._t0 = self._tstart - (t[-1] if t else 0.)
+        self._resume = resume
         self._model, self._args = model, args
 
         def name(m):
             return m if isinstance(m, str) or m is None else \
                 type(m).__name__ if not isinstance(m, type) else m.__name__
         self.info.append(dict(
-            train=self._ntrain, seed=self._seed,
+            train=self._cur, resume=resume, seed=self._seed,
             start=time.strftime('%Y-%m-%d %H:%M:%S'),
             method=name(method), optimizer=repr(opt),
             balance=name(balance) if not isinstance(
@@ -176,7 +191,7 @@ class monitor:
         wj = np.asarray(w, np.asarray(model.w).dtype)
         T = np.asarray(model._terms(wj, *args), np.float64)
         lmbd = np.asarray(lmbd, np.float64)
-        row = dict(train=self._ntrain,
+        row = dict(train=self._cur, resume=self._resume,
                    seed=-1 if self._seed is None else self._seed,
                    it=it, t=time.time() - self._t0, run=run, phase=phase,
                    end=end, loss=float(np.sum(lmbd*T)), terms=T, lmbd=lmbd)
@@ -197,7 +212,7 @@ class monitor:
             fmt = {'float_kind': lambda v: '%.2e' % v}
             ms = ''.join('  %s %.3e' % (n, row[n]) for n in self.metrics or ())
             print('train %d%s  it %6d  t %7.2fs  run %3d  loss %.3e  terms %s'
-                  '%s' % (self._ntrain, '' if self._seed is None else
+                  '%s' % (self._cur, '' if self._seed is None else
                           ' seed %d' % self._seed, it, row['t'], run,
                           row['loss'], np.array2string(T, formatter=fmt), ms))
         return row
@@ -212,13 +227,14 @@ class monitor:
         return state
 
     def _timeout(self):
-        return self.tmax is not None and time.time() - self._t0 > self.tmax
+        return (self.tmax is not None and
+                time.time() - self._tstart > self.tmax)
 
     def _end(self, w, res):
         """End of a training: final weights and the result in 'info'
         (missing if the training was interrupted)."""
         self.final[self._seed] = np.array(w, np.float64)
-        self.info[-1].update(time=time.time() - self._t0, nit=res.nit,
+        self.info[-1].update(time=time.time() - self._tstart, nit=res.nit,
                              nouter=res.nouter, fun=float(res.fun),
                              status=res.status,
                              message=str(res.get('message', '')))
@@ -259,7 +275,8 @@ class monitor:
         'term i'). Each term has its own marker (also its lambda); own
         'marker', 'ms' or 'markevery' apply to all curves. 'grid' draws a
         light grid (True at the powers of ten, 'both' also between them,
-        False none); the dashed vertical lines are the lambda updates. Other
+        False none); the dashed vertical lines are the lambda updates, red
+        dash-dot lines the resumes. Other
         keyword arguments go to every curve (matplotlib, e.g. ls=':').
         Saved to 'fname' if given; returns the figure (axes: terms, loss,
         lambdas, metrics) to change further."""
@@ -294,10 +311,14 @@ class monitor:
             _markers(a.semilogy(it, np.abs(h[name][s]), **kwargs), kwargs)
             a.set_ylabel(name)
         ends = it[h['end'][s]]
+        rs = h['resume'][s]
+        resumes = it[:-1][np.diff(rs) > 0]  # last record before a resume
         for a in ax:
             _grid(a, grid)
             for e in ends:  # lambda updates
                 a.axvline(e, color='0.35', lw=0.8, ls='--')
+            for e in resumes:
+                a.axvline(e, color='tab:red', lw=1., ls='-.')
         ax[-1].set_xlabel('iteration' if x == 'it' else 'time [s]')
         fig.tight_layout()
         if fname is not None:

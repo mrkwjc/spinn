@@ -943,6 +943,85 @@ class TestMonitor:
             N.train(x, t, maxiter=5, monitor=0)
 
 
+class TestResume:
+    def test_same_as_one_training(self):
+        # train + resume = one training with all the iterations (the lambda
+        # update after the last run is done by resume)
+        x, t = data()
+        for method, n1, n2 in (('adam', 200, 100), ('lbfgs', 500, 500)):
+            b = balance.curv(inner=100 if method == 'adam' else 500)
+            N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+            r = N.train(x, t, method=method, maxiter=n1, balance=b)
+            r2 = N.resume(r, maxiter=n2)
+            M = fit2([1, 8, 1], f=jnp.tanh, key=1)
+            r3 = M.train(x, t, method=method, maxiter=n1 + n2, balance=b)
+            assert r2.nit == r3.nit and r2.nouter == r3.nouter
+            np.testing.assert_allclose(N.w, M.w, rtol=1e-5, atol=1e-7)
+            np.testing.assert_allclose(r2.lmbd, r3.lmbd, rtol=1e-5)
+
+    def test_res_unchanged(self):
+        # resume does not change 'res': resuming it again gives the same
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r = N.train(x, t, method='adam', maxiter=100,
+                    balance=balance.curv(inner=50))
+        st = (r.state.nit, r.state.k, r.state.resume)
+        ra = N.resume(r, maxiter=100)
+        rb = N.resume(r, maxiter=100)
+        assert (r.state.nit, r.state.k, r.state.resume) == st
+        np.testing.assert_allclose(ra.x, rb.x)
+        assert ra.state.resume == 1 and N.resume(ra, maxiter=10).state.\
+            resume == 2
+        assert 'training state' in repr(r.state)
+        with pytest.raises(TypeError):
+            N.resume({'x': 1})
+        with pytest.raises(TypeError):
+            N.resume(r, method='lbfgs')
+
+    def test_monitor(self):
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r = N.train(x, t, method='adam', maxiter=100,
+                    balance=balance.curv(inner=50), monitor=25)
+        m = r.monitor
+        r2 = N.resume(r, maxiter=50)
+        h = m.history
+        # the same training goes on: one history, iterations count on
+        assert r2.monitor is m and set(h['train']) == {0}
+        assert h['it'].tolist() == [0, 25, 50, 75, 100, 125, 150]
+        assert h['resume'].tolist() == [0]*5 + [1]*2
+        assert np.all(np.diff(h['t']) >= 0)
+        assert [i['resume'] for i in m.info] == [0, 1]
+        assert m.info[1]['maxiter'] == 50 and m.info[1]['nit'] == 150
+        m.plot(x='t') if _mpl() else None
+        # monitor=False: no records; a new monitor: a fresh history
+        N.resume(r2, maxiter=50, monitor=False)
+        assert len(m.history['it']) == 7
+        r3 = N.resume(r2, maxiter=50, monitor=25)
+        assert r3.monitor is not m
+        assert r3.monitor.history['it'].tolist() == [150, 175, 200]
+
+    def test_args_and_seeds(self):
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r = N.train(x, t, maxiter=100, seeds=[1, 2], monitor=50)
+        assert r.state.seed == r.seed
+        x2 = jnp.linspace(0., 1., 40)[:, None]   # finer data
+        r2 = N.resume(r, x2, jnp.sin(3*x2), maxiter=100)
+        assert r2.state.args[0].shape == (40, 1)
+        h = r.monitor.history
+        assert set(h['seed'][h['resume'] == 1]) == {r.seed}
+
+
+def _mpl():
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        return True
+    except ImportError:
+        return False
+
+
 class TestActivations:
     def test_names(self):
         x, _ = data()

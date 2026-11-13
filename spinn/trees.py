@@ -15,6 +15,43 @@ from spinn import optimize as optimizers
 from spinn import monitor as monitoring
 
 
+def _monitor(m):
+    """Monitor from the 'monitor' argument: True the default one, a number
+    'every', False or None no monitor."""
+    if m is True:
+        return monitoring.monitor()
+    if m is False or m is None:
+        return None
+    if isinstance(m, (int, np.integer)):
+        if m < 1:
+            raise ValueError("monitor: 'every' must be positive")
+        return monitoring.monitor(every=int(m))
+    return m
+
+
+class _trainstate:
+    """What 'resume' needs (res.state): the data, the balancer and optimizer
+    of the training (with their state), lambdas, phase and counters."""
+    def __init__(self, args, opt, b, method, balance, maxiter, seed=None):
+        self.args, self.opt, self.b = args, opt, b
+        self.method, self.balance, self.maxiter = method, balance, maxiter
+        self.seed = seed
+        self.lmbd = None        # fresh: set by the first lambdas
+        self.x = None           # final weights
+        self.nit = self.nfev = self.k = self.short = self.phase = 0
+        self.last = False
+        self.pending = False    # lambda update after the last run to do
+        self.lastrun = None     # (its iterations, success)
+        self.resume = 0         # number of resumes so far
+        self.monitor = None     # monitor which recorded it
+        self.mtrain = None      # its training number in that monitor
+
+    def __repr__(self):
+        return ('<training state: %d runs, %d iterations, phase %d, '
+                'resumed %d times>' % (self.k, self.nit, self.phase,
+                                       self.resume))
+
+
 class spinn:
     """
     Neural network for physics informed training. Subclass it, define
@@ -306,19 +343,13 @@ class spinn:
             raise AttributeError("'eqc' and 'ineqc' are not supported any "
                                  "more, return the constraints as 'terms' "
                                  "after the equation")
-        if monitor is True:
-            monitor = monitoring.monitor()
-        elif monitor is False:
-            monitor = None
-        elif isinstance(monitor, (int, np.integer)):
-            if monitor < 1:
-                raise ValueError("monitor: 'every' must be positive")
-            monitor = monitoring.monitor(every=int(monitor))
+        monitor = _monitor(monitor)
         if seeds is not None:
             return self._train_seeds(seeds, args, dict(
                 tol=tol, maxiter=maxiter, disp=disp, method=method,
                 balance=balance, monitor=monitor, **kwargs))
         callback = kwargs.pop('callback', None)
+        seed = kwargs.pop('_seed', None)  # from 'seeds'
         opt = copy.deepcopy(optimizers.get(method))  # state of this training
         if tol is not None:
             opt.tol = tol
@@ -330,9 +361,49 @@ class spinn:
             opt.options = dict(opt.options or {}, **options)
             opt.kwargs = dict(opt.kwargs or {}, **kwargs)
         b = copy.deepcopy(balancing.get(balance))  # state of this training
+        st = _trainstate(args=args, opt=opt, b=b, method=method,
+                         balance=balance, maxiter=maxiter, seed=seed)
         if maxiter is None:
             maxiter = opt.maxiter
-        mon = monitor
+        return self._fit(st, np.asarray(self.w, dtype=np.float64), maxiter,
+                         disp, callback, monitor)
+
+    def resume(self, res, *args, maxiter=None, tol=None, disp=False,
+               callback=None, monitor=None):
+        """
+        Continue the training that returned 'res': from its final weights,
+        with the state of its balancer (lambdas, phase, averages) and
+        optimizer (e.g. the schedule of adam), on its data (references kept
+        in 'res'; new 'args' replace them, e.g. a finer grid). 'maxiter' are
+        further iterations (default the optimizer's), counted on from the
+        training. 'tol', 'disp' and 'callback' as in 'train'. The monitor of
+        'res' records on (column 'resume' of its history); monitor=False
+        stops recording, a new monitor (or number, True) starts a fresh
+        history. Method and balancer cannot change: their state is in 'res'
+        (use 'train' for others). With 'seeds' the kept training is resumed.
+        'res' itself is not changed, so it can be resumed again.
+        """
+        st0 = res.get('state') if hasattr(res, 'get') else None
+        if not isinstance(st0, _trainstate):
+            raise TypeError("res must be a result of 'train' or 'resume'")
+        st = copy.copy(st0)
+        st.opt, st.b = copy.deepcopy(st0.opt), copy.deepcopy(st0.b)
+        st.resume = st0.resume + 1
+        if args:
+            st.args = args
+        if tol is not None:
+            st.opt.tol = tol
+        if maxiter is None:
+            maxiter = st.opt.maxiter
+        if monitor is None:
+            monitor = st.monitor        # records on (or None)
+        return self._fit(st, st.x, st.nit + maxiter, disp, callback, monitor)
+
+    def _fit(self, st, w, maxiter, disp, callback, monitor):
+        """The training loop of 'train' and 'resume': state 'st' (fresh if
+        st.lmbd is None), weights 'w' (numpy), total iterations 'maxiter'."""
+        args, opt, b = st.args, st.opt, st.b
+        mon = _monitor(monitor)
         if mon is not None:
             every = opt.every if mon.every is None else mon.every
             if hasattr(opt, 'chunk'):  # optimizers on the device
@@ -369,51 +440,44 @@ class spinn:
         def lambdas(w, current):  # current - lambdas in the loss so far
             return np.asarray(b(self, w, current, *args), np.float64)
 
-        w = np.asarray(self.w, dtype=np.float64)
         dtype = jnp.asarray(self.w).dtype
-        if len(terms(w)) < 2:
-            b = balancing.fixed()  # one term, nothing to balance
+        fresh = st.lmbd is None
+        if fresh:
+            if len(terms(w)) < 2:
+                b = st.b = balancing.fixed()  # one term, nothing to balance
+            lmbd = lambdas(w, None)
+            nit = nfev = k = short = phase = 0
+            last = False  # the balancer has no next phase ('advance' said)
+        else:
+            lmbd, nit, nfev, k = st.lmbd, st.nit, st.nfev, st.k
+            short, phase, last = st.short, st.phase, st.last
         inner = opt.inner if b.inner is None else b.inner
-        lmbd = lambdas(w, None)
-        nit = nfev = k = short = phase = 0
-        last = False  # the balancer has no next phase ('advance' said so)
+        k0 = k
         if mon is not None:
-            mon._begin(self, args, opt, b, method=method, balance=balance,
-                       maxiter=maxiter, inner=inner, every=every)
-            state['last'] = 0
-            mon._record(w, 0, 0, 0, lmbd)
-        while True:
-            n = int(min(inner, maxiter - nit))
-            res = run(w, lmbd, n)
-            w = res.x
-            nit += res.nit
-            nfev += res.nfev
-            k += 1
-            if mon is not None:  # end of the run: the lambdas change
-                state['last'] = nit
-                mon._record(w, nit, k, phase, lmbd, end=True)
-            if disp:
-                fmt = {'float_kind': lambda v: '%.2e' % v}
-                print('run %3d: nit %5d  terms %s  lmbd %s'
-                      % (k, res.nit,
-                         np.array2string(terms(w), formatter=fmt),
-                         np.array2string(lmbd, formatter=fmt)))
-            # (almost) no progress twice in a row: line search failed, or
-            # the lambdas keep changing while the optimizer has nothing left
-            # to do (once is not enough, a run with poor lambdas can stop
-            # early and the next lambdas recover)
-            short = short + 1 if res.nit < min(10, n) else 0
-            # stopped by callback, out of iterations or of lambda updates
-            if res.status == 99 or nit >= maxiter or k >= b.outer:
-                break
+            on = mon is st.monitor and not fresh  # the same history goes on
+            mon._seed = st.seed
+            mon._begin(self, args, opt, b, method=st.method,
+                       balance=st.balance, resume=st.resume,
+                       train=st.mtrain if on else None,
+                       maxiter=st.maxiter if fresh else maxiter - nit,
+                       inner=inner, every=every)
+            state['last'] = nit
+            if not on:
+                mon._record(w, nit, k, phase, lmbd)
+
+        def decide(rnit, success):
+            """After a run of 'rnit' iterations: new lambdas, next phase;
+            True if the training is done."""
+            nonlocal short, phase, last, lmbd
             # no progress
-            done = res.nit == 0 or short >= 2
+            done = rnit == 0 or short >= 2
             settled = False
+            new = lmbd
             if not done:
                 new = lambdas(w, lmbd)
                 settled = np.max(np.abs(new/lmbd - 1.)) < 0.1
                 # converged and lambdas settled
-                done = res.success and settled
+                done = success and settled
             # an 'anytime' optimizer (e.g. adam, its runs do not converge)
             # moves to the next phase once the lambdas settle, and in the
             # last phase goes on
@@ -423,17 +487,65 @@ class spinn:
                     phase += 1
                     new = lambdas(w, lmbd)
                 elif done:
-                    break
+                    return True
                 else:  # never asked again: 'advance' returns False once
                     last = True
             lmbd = new
+            return False
+
+        try:
+            if st.pending:  # the update after the last run of 'res'
+                decide(*st.lastrun)  # (done or not: resume goes on)
+                st.pending = False
+            while nit < maxiter:
+                n = int(min(inner, maxiter - nit))
+                res = run(w, lmbd, n)
+                w = res.x
+                nit += res.nit
+                nfev += res.nfev
+                k += 1
+                if mon is not None:  # end of the run: the lambdas change
+                    state['last'] = nit
+                    mon._record(w, nit, k, phase, lmbd, end=True)
+                if disp:
+                    fmt = {'float_kind': lambda v: '%.2e' % v}
+                    print('run %3d: nit %5d  terms %s  lmbd %s'
+                          % (k, res.nit,
+                             np.array2string(terms(w), formatter=fmt),
+                             np.array2string(lmbd, formatter=fmt)))
+                # (almost) no progress twice in a row: line search failed,
+                # or the lambdas keep changing while the optimizer has
+                # nothing left to do (once is not enough, a run with poor
+                # lambdas can stop early and the next lambdas recover)
+                short = short + 1 if res.nit < min(10, n) else 0
+                # stopped by callback, out of iterations or lambda updates:
+                # the update after this run is left to 'resume'
+                if res.status == 99 or nit >= maxiter or k >= b.outer:
+                    st.pending, st.lastrun = True, (res.nit, res.success)
+                    break
+                if decide(res.nit, res.success):
+                    break
+        except BaseException:
+            if mon is not None:
+                mon._seed = None
+            raise
+        if k == k0:  # no run: nothing left to do
+            res = optimizers.OptimizeResult(
+                x=w, fun=float(np.sum(lmbd*terms(w))), status=1,
+                success=False, message='no iterations left')
         self.w = jnp.asarray(w)
         res.nit, res.nfev, res.nouter = nit, nfev, k
         res.lmbd = lmbd
         res.terms = terms(w)
+        st.x, st.lmbd, st.nit, st.nfev, st.k = w, lmbd, nit, nfev, k
+        st.short, st.phase, st.last = short, phase, last
+        st.monitor = mon
         if mon is not None:
+            st.mtrain = mon._cur
             mon._end(w, res)
+            mon._seed = None
             res.monitor = mon
+        res.state = st
         return res
 
     def _train_seeds(self, seeds, args, kw):
@@ -451,9 +563,7 @@ class spinn:
                 if kw['disp']:
                     print('seed %d (%d of %d)' % (key, i + 1, len(seeds)))
                 self.initw(key)
-                if kw['monitor'] is not None:
-                    kw['monitor']._seed = key
-                res = self.train(*args, **kw)
+                res = self.train(*args, _seed=key, **kw)
                 score = float(res.fun)
                 scores.append(score)
                 if best is None or score < best[0] or not best[0] == best[0]:
@@ -463,8 +573,6 @@ class spinn:
         finally:  # also on an exception: the best training so far
             if best is not None:
                 self.w = best[2]
-            if kw['monitor'] is not None:
-                kw['monitor']._seed = None
         _, key, _, res = best
         res.seed, res.seeds, res.scores = key, seeds[:len(scores)], \
             np.array(scores)

@@ -43,6 +43,12 @@
   of all trainings in one figure. The monitor is not copied, so it can be
   read also after an interruption. `train(..., monitor=200)` creates one
   (`every=200`), returned in `res.monitor`.
+- **Continuing a training:** `P.resume(res, maxiter=5000)` continues the
+  training that returned `res`, from its weights and with the state of its
+  balancer and optimizer, on its data (or new data passed as arguments).
+  Training and resume give the same course as one training with all the
+  iterations. The monitor records on (column `resume`); `res` itself stays
+  unchanged.
 
 ### Fixed
 
