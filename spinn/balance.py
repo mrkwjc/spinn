@@ -7,8 +7,9 @@ sum(lmbd * terms) ('weights' alone are the weights of the network).
 adam, see 'spinn.optimize') with fixed lambdas, then asks the balancer for
 new ones, and repeats this until the lambdas settle (the optimizer
 converged and no lambda changed by more than 10%), two optimizer runs in a
-row make less than 10 iterations (nothing left to gain), after 'outer'
-updates or when 'maxiter' is used up. (When the optimizer has converged,
+row make less than 10 iterations or return the weights they started from
+(nothing left to gain), after 'outer' updates or when 'maxiter' is used
+up. (When the optimizer has converged,
 further updates hardly change the lambdas and only restart it, so a
 stricter stop costs time without gaining accuracy.)
 

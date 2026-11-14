@@ -34,7 +34,8 @@
   2000 iterations between lambda updates and 30000 in all; option `warmup`,
   100 by default, raises the learning rate linearly over the first steps of
   each run, at most a tenth of the run, as its moments start from zero in
-  each run),
+  each run; two runs in a row which return the weights they started from
+  end the phase of the balancer, in the last phase the training),
   `minimize` (any scipy method, e.g. `minimize(method='BFGS', tol=1e-8)`),
   and your own optimizer as a subclass of `spinn.optimize.optimizer`.
   `method` accepts a name, a class or an instance. The optimizer sets the

@@ -210,6 +210,7 @@ class trainer:
                                  end=self.nit + n)
                 res = opt(model, w, jnp.asarray(self.lmbd, dtype),
                           *self.args, n=n, callback=callback)
+                stuck = np.array_equal(res.x, w)  # the start was the best
                 w = res.x
                 self.nit += res.nit
                 self.nfev += res.nfev
@@ -227,9 +228,12 @@ class trainer:
                              np.array2string(self.lmbd, formatter=fmt)))
                 # (almost) no progress twice in a row: line search failed,
                 # or the lambdas keep changing while the optimizer has
-                # nothing left to do (once is not enough, a run with poor
-                # lambdas can stop early and the next lambdas recover)
-                self.short = self.short + 1 if res.nit < min(10, n) else 0
+                # nothing left to do, or (e.g. adam, which runs on) its
+                # runs return the weights they started from (once is not
+                # enough, a run with poor lambdas can stop early or gain
+                # nothing and the next lambdas recover)
+                self.short = self.short + 1 if (
+                    res.nit < min(10, n) or stuck) else 0
                 # stopped by callback, out of iterations or lambda updates:
                 # the update after this run is left to the next fit
                 if res.status == 99 or self.nit >= end or self.k >= b.outer:
@@ -237,6 +241,8 @@ class trainer:
                     self.lastrun = (res.nit, res.success)
                     break
                 if self._decide(model, w, res.nit, res.success):
+                    if self.short >= 2:
+                        res.message = 'no progress in the last two runs'
                     break
         except BaseException:
             if mon is not None:

@@ -697,6 +697,46 @@ class TestOptimize:
         r = N.train(x, t, method=optimize.adam(inner=20), maxiter=30)
         assert r.nit == 30 and r.nouter == 2
 
+    def test_stuck_runs(self):
+        # runs which return the weights they started from (e.g. adam, which
+        # always runs 'inner' iterations) are no progress: two in a row end
+        # the phase, in the last phase the training
+        x, t = data()
+
+        class still(optimize.optimizer):
+            anytime = True
+            inner = 20
+            moves = (False,)    # cycled: does the run move the weights?
+
+            def __call__(self, model, w, lmbd, *args, n, callback=None):
+                self.k = getattr(self, 'k', -1) + 1
+                move = self.moves[self.k % len(self.moves)]
+                x = np.asarray(w, np.float64) + (1e-6 if move else 0.)
+                return optimize.OptimizeResult(
+                    x=x, fun=float(model._loss(x, lmbd, *args)), nit=n,
+                    nfev=n, status=1, success=False,
+                    message='maximum number of iterations reached')
+
+        class flip(balance.balancer):   # lambdas which never settle
+            k = 0
+
+            def __call__(self, model, w, lmbd, *args):
+                self.k += 1
+                return [1., 2.**(1 + self.k % 2)]
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r = N.train(x, t, method=still(), balance=flip(), maxiter=200)
+        assert r.nouter == 2 and r.nit == 40
+        assert r.message == 'no progress in the last two runs'
+        # with phases: two runs in each
+        r = N.train(x, t, method=still(), maxiter=200,
+                    balance=balance.phases(flip(), flip()))
+        assert r.nouter == 4 and r.state.phase == 1
+        # progress in between: the training goes on to 'maxiter'
+        r = N.train(x, t, method=still(moves=(False, True)), balance=flip(),
+                    maxiter=200)
+        assert r.nouter == 10 and r.nit == 200
+        assert r.message == 'maximum number of iterations reached'
+
     def test_anytime(self):
         # adam's runs do not converge: settled weights move to the next
         # phase, and the last phase runs until maxiter
