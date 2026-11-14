@@ -242,6 +242,18 @@ class TestTrain:
         r2 = N.train(x, bx, maxiter=3000, balance=b)
         np.testing.assert_allclose(r2.lmbd, r.lmbd)
 
+    def test_sens_compiles_once(self):
+        # the power iteration and the conjugate gradients call '_losshv'
+        # with the same shape: one compilation
+        x = (jnp.linspace(0., .5, 11)[:, None],
+             jnp.linspace(.5, 1., 11)[:, None])
+        bx = jnp.asarray([[0.], [1.]])
+        N = poisson([1, 7, 2], f=jnp.tanh, key=1)   # a network of its own
+        n = balance._losshv._cache_size()
+        lmbd = balance.sens()(N, N.w, None, x, bx)
+        assert np.all(np.isfinite(lmbd))
+        assert balance._losshv._cache_size() == n + 1
+
     def test_sens_zero_term(self):
         # a term at exactly 0 (float32) has a zero gradient: sensitivity 0/0;
         # it must not become the reference (all other weights at the cap)
@@ -646,6 +658,13 @@ class TestOptimize:
             r = N.train(x, t, method='lbfgs', maxiter=600,
                         balance=balance.curv(inner=100))
         assert r.nouter > 1 and optimize._lbfgs_run._cache_size() == n
+        # runs in chunks (a monitor, every 10 iterations): the chunks after
+        # the first are not compiled again
+        N = fit2([1, 8, 1], f=jnp.tanh, key=4)
+        r = N.train(x, t, method=optimize.lbfgs(tol=0.), maxiter=100,
+                    balance=balance.curv(inner=50), monitor=10)
+        assert len(r.monitor.rows) > 5
+        assert optimize._lbfgs_run._cache_size() == n
 
     def test_adam(self):
         x, t = data()
@@ -788,6 +807,11 @@ class TestOptimize:
             r = N.train(x, t, method=optimize.adam(lr=lr, warmup=warmup),
                         maxiter=300, balance=balance.curv(inner=100))
         assert r.nouter > 1 and optimize._adam_run._cache_size() == n
+        N = fit2([1, 8, 1], f=jnp.tanh, key=4)    # runs in chunks
+        r = N.train(x, t, method='adam', maxiter=100,
+                    balance=balance.curv(inner=50), monitor=10)
+        assert len(r.monitor.rows) > 5
+        assert optimize._adam_run._cache_size() == n
 
 
 def swish(x):       # module-level activation, saved by its dotted path
