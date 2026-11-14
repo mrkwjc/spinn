@@ -10,7 +10,7 @@ record several trainings, e.g. to compare optimizers or balancers, and with
 iteration limit) is continued by 'resume', and its monitor records on.
 """
 import jax.numpy as jnp
-from spinn import hcube, mlgraph, monitor
+from spinn import hcube, mlgraph, monitor, balance
 
 from beam import beam, exact
 
@@ -27,13 +27,23 @@ if __name__ == "__main__":
         F = B.propx([[x, 0]])[0]
         return jnp.linalg.norm(F - Fe) / jnp.linalg.norm(Fe)
 
+    # 0. Warm-up: the first training of each kind compiles its code (a few
+    # seconds), which the monitor would count as training time. A few
+    # iterations of each optimizer, the sensitivities of 'curvsens' and the
+    # metric compile it beforehand (for this network and these data), so
+    # that the times below are of the trainings alone
+    B = beam(mlgraph((1, 32, 1)), initx=x, key=1)
+    for method in ('lbfgs', 'adam'):
+        B.train(x, q, bx, EI, method=method, maxiter=10)
+    balance.sens()(B, B.w, None, x, q, bx, EI)
+    err(B)
+
     # 1. One monitor for four trainings: two optimizers, two balancers
     m = monitor(metrics={'err': err})
     for method in ('lbfgs', 'adam'):
-        for balance in ('curv', 'curvsens'):
+        for bal in ('curv', 'curvsens'):
             B = beam(mlgraph((1, 32, 1)), initx=x, key=1)
-            B.train(x, q, bx, EI, method=method, balance=balance, monitor=m)
-    # (the first trainings include compilation, so their times are longer)
+            B.train(x, q, bx, EI, method=method, balance=bal, monitor=m)
 
     print('%-6s %-9s %8s %7s %6s %10s' % ('method', 'balance', 'time [s]',
                                           'nit', 'runs', 'error'))
