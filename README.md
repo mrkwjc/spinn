@@ -77,7 +77,10 @@ m.plot()
 ```
 
 A training is continued with `res = P.resume(res, maxiter=5000)`: from where
-it stopped, with the state of its balancer and optimizer.
+it stopped, with the state of its balancer and optimizer. Results are saved
+with `res.save('beam.res')` and loaded with `spinn.result.load('beam.res')`
+(network in `res.model`, monitor in `res.monitor`); `load(..., model=False)`
+reads the results and the network without the class of the problem.
 
 ## Accuracy
 

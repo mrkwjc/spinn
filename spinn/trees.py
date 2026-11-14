@@ -13,6 +13,7 @@ from spinn import graphs, utils, storage
 from spinn import balance as balancing
 from spinn import optimize as optimizers
 from spinn import monitor as monitoring
+from spinn.result import result as _result
 
 
 def _monitor(m):
@@ -391,6 +392,13 @@ class spinn:
         st.resume = st0.resume + 1
         if args:
             st.args = args
+        elif st.args is None:
+            raise ValueError("the data of the training were not saved with "
+                             "the result: pass them, resume(res, *args)")
+        if getattr(st.opt, 'lr', 0.) is None:
+            raise ValueError("the learning rate schedule of adam was not "
+                             "saved (no importable name): set it, "
+                             "res.state.opt.lr = schedule")
         if tol is not None:
             st.opt.tol = tol
         if maxiter is None:
@@ -534,6 +542,8 @@ class spinn:
                 x=w, fun=float(np.sum(lmbd*terms(w))), status=1,
                 success=False, message='no iterations left')
         self.w = jnp.asarray(w)
+        res = _result(res)
+        res['_model'] = copy.copy(self)  # for res.model (at res.x)
         res.nit, res.nfev, res.nouter = nit, nfev, k
         res.lmbd = lmbd
         res.terms = terms(w)

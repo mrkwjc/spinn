@@ -55,6 +55,13 @@
   Training and resume give the same course as one training with all the
   iterations. The monitor records on (column `resume`); `res` itself stays
   unchanged.
+- **Results** are of the new class `spinn.result` (still a scipy
+  `OptimizeResult`): `res.model` gives the trained network (a new copy at
+  `res.x` each time), `res.save(fname)` saves network, result, monitor and
+  the state for `resume` in one NPZ file (the training data with
+  `data=True`), `result.load(fname)` restores all, and
+  `result.load(fname, model=False)` only results, monitor and the network
+  as a plain `spinn` (`res.network`), without the class of the problem.
 
 ### Fixed
 

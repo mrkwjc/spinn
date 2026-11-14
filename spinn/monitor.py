@@ -217,6 +217,44 @@ class monitor:
                           row['loss'], np.array2string(T, formatter=fmt), ms))
         return row
 
+    def _plain(self, arrays):
+        """The monitor as JSON data (arrays into 'arrays'), for saving
+        results: options (metric functions by name only), history as
+        columns, final weights and info."""
+        from spinn import storage
+        h = self.history
+        opts = dict(every=self.every, tmax=self.tmax, disp=self.disp,
+                    keepw=self.keepw, metrics=self.metrics and {
+                        k: f if isinstance(f, str) else None
+                        for k, f in self.metrics.items()})
+        plain = dict(options=opts, history=h, info=self.info,
+                     final=self.final, ntrain=self._ntrain,
+                     nterms=[len(r['terms']) for r in self.rows])
+        return storage.encode(plain, arrays, objects=False)
+
+    @classmethod
+    def _from_plain(cls, data, arrays):
+        from spinn import storage
+        d = storage.decode(data, arrays)
+        m = cls(**d['options'])
+        h, nt = d['history'], d['nterms']
+        for i, n in enumerate(nt):
+            row = {}
+            for k, v in h.items():
+                v = v[i]
+                if k in ('terms', 'lmbd'):
+                    v = np.array(v[:n])
+                elif k == 'w':
+                    v = np.array(v)
+                else:
+                    v = v.item()
+                row[k] = v
+            m.rows.append(row)
+        m.final = {k: np.asarray(w) for k, w in d['final'].items()}
+        m.info = d['info']
+        m._ntrain = d['ntrain']
+        return m
+
     def __getstate__(self):
         # plain data: no metric functions, model or arguments of a training
         state = dict(self.__dict__)

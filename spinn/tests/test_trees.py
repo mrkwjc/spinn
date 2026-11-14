@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from spinn import utils, graphs, spinn, balance, optimize, monitor
+from spinn import utils, graphs, spinn, balance, optimize, monitor, result
 
 
 # Reference layered network, independent of spinn
@@ -1011,6 +1011,112 @@ class TestResume:
         assert r2.state.args[0].shape == (40, 1)
         h = r.monitor.history
         assert set(h['seed'][h['resume'] == 1]) == {r.seed}
+
+
+class TestResult:
+    def _train(self, **kw):
+        x, t = data()
+        N = fit2n([1, 8, 1], f=jnp.tanh, key=1)
+        kw = dict(dict(method='adam', maxiter=100,
+                       balance=balance.curv(inner=50),
+                       monitor=monitor(every=25, metrics={
+                           'n': 'norm', 'f': lambda P: 1.})), **kw)
+        return N, N.train(x, t, **kw), x, t
+
+    def test_model(self):
+        # res.model: a new copy at res.x each time; res does not change
+        N, r, x, t = self._train()
+        assert isinstance(r, result) and isinstance(r, optimize.OptimizeResult)
+        M = r.model
+        assert M is not N and M is not r.model and type(M) is fit2n
+        np.testing.assert_array_equal(M.w, N.w)
+        x0 = np.array(r.x)
+        r.model.resume(r, maxiter=50)
+        np.testing.assert_array_equal(r.x, x0)
+        np.testing.assert_array_equal(r.model.w, M.w)
+        assert '_model' not in repr(r) and 'model' not in r
+
+    def test_save_load(self, tmp_path):
+        import json
+        N, r, x, t = self._train()
+        fname = str(tmp_path/'r.res')
+        r.save(fname, data=True)
+        r2 = result.load(fname)
+        for k in ('fun', 'nit', 'nouter', 'status', 'message'):
+            assert r2[k] == r[k]
+        np.testing.assert_array_equal(r2.x, r.x)
+        np.testing.assert_array_equal(r2.lmbd, r.lmbd)
+        np.testing.assert_allclose(r2.model(x), r.model(x))
+        h, h2 = r.monitor.history, r2.monitor.history
+        assert sorted(h) == sorted(h2)
+        for k in h:
+            np.testing.assert_array_equal(h2[k], h[k])
+        assert r2.monitor.info == r.monitor.info
+        assert r2.monitor.metrics == {'n': 'norm', 'f': None}
+        np.testing.assert_array_equal(r2.monitor.final[None],
+                                      r.monitor.final[None])
+        # resume after loading = resume before saving (data were saved)
+        r.monitor.metrics['f'] = r2.monitor.metrics['f'] = lambda P: 1.
+        ra = r.model.resume(r, maxiter=50)
+        rb = r2.model.resume(r2, maxiter=50)
+        np.testing.assert_allclose(rb.x, ra.x, rtol=1e-6, atol=1e-8)
+        assert r2.monitor.history['resume'][-1] == 1
+        # numpy alone
+        with np.load(fname, allow_pickle=False) as z:
+            meta = json.loads(str(z['__meta__']))
+        assert meta['format'] == 'spinn.result' and meta['cls'].endswith(
+            ':fit2n')
+
+    def test_light_load(self, tmp_path):
+        N, r, x, t = self._train()
+        fname = str(tmp_path/'r.res')
+        r.save(fname)
+        r3 = result.load(fname, model=False)
+        assert type(r3.network) is spinn and 'state' not in r3
+        np.testing.assert_allclose(r3.network(x), N(x))
+        with pytest.raises(AttributeError, match='model=False'):
+            r3.model
+        assert len(r3.monitor.history['it']) == len(r.monitor.rows)
+        r3.save(str(tmp_path/'again.res'))     # a loaded result saves too
+        r4 = result.load(str(tmp_path/'again.res'))
+        np.testing.assert_allclose(r4.model(x), N(x))
+
+    def test_data_and_schedule(self, tmp_path):
+        # without saved data resume needs them; a lambda schedule is lost
+        N, r, x, t = self._train(method=optimize.adam(lr=lambda k: 1e-3))
+        fname = str(tmp_path/'r.res')
+        r.save(fname)
+        r2 = result.load(fname)
+        assert r2.state.args is None and r2.state.opt.lr is None
+        with pytest.raises(ValueError, match='not saved'):
+            r2.model.resume(r2, x, t)
+        r2.state.opt.lr = 1e-3
+        with pytest.raises(ValueError, match='data'):
+            r2.model.resume(r2)
+        r2.monitor.metrics['f'] = lambda P: 1.
+        assert r2.model.resume(r2, x, t, maxiter=10).nit == 110
+
+    def test_scipy_and_local_class(self, tmp_path):
+        x, t = data()
+        # scipy's hess_inv is not plain data: skipped, noted
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r = N.train(x, t, method='L-BFGS-B', maxiter=20)
+        fname = str(tmp_path/'r.res')
+        r.save(fname)
+        assert result.load(fname).nit == r.nit
+
+        class local(fit2):     # no importable name: only the light load
+            pass
+        M = local([1, 8, 1], f=jnp.tanh, key=1)
+        r = M.train(x, t, maxiter=20)
+        r.save(fname)
+        with pytest.raises(ImportError, match='model=False'):
+            result.load(fname)
+        np.testing.assert_allclose(result.load(fname, model=False).network(
+            x), M(x))
+        with pytest.raises(ValueError, match="holds 'spinn.network'"):
+            M.dump(fname)
+            result.load(fname)
 
 
 def _mpl():
