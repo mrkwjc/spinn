@@ -969,6 +969,54 @@ class TestMonitor:
         with pytest.raises(ValueError):
             m.plot(grid='minor')
 
+    def test_plot_lines(self):
+        # vlines=True: vertical lines at the lambda updates (dashed), the
+        # changes of the phase (solid) and the resumes (dash-dot), with a
+        # legend in the loss axes; none by default
+        matplotlib = pytest.importorskip('matplotlib')
+        matplotlib.use('Agg')
+        x, t = data()
+
+        class const(balance.balancer):
+            def __init__(self, v, **options):
+                super().__init__(**options)
+                self.v = v
+
+            def __call__(self, model, w, lmbd, *args):
+                return self.v
+        b = balance.phases(const([1., 2.]), const([1., 5.]), inner=20)
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r = N.train(x, t, method='adam', maxiter=100, balance=b,
+                    monitor=monitor(every=10))
+        r = N.resume(r, maxiter=40)
+        h = r.monitor.history
+        assert set(h['phase']) == {0, 1} and r.nouter == 7
+
+        def vlines(ax):
+            out = {}
+            for ln in ax.get_lines():
+                xs = ln.get_xdata()
+                if len(xs) == 2 and xs[0] == xs[1]:
+                    out.setdefault(ln.get_linestyle(), []).append(xs[0])
+            return out
+        fig = r.monitor.plot()
+        assert vlines(fig.axes[1]) == {} and fig.axes[1].get_legend() is None
+        fig = r.monitor.plot(vlines=True)
+        v = vlines(fig.axes[1])
+        phase = h['it'][:-1][np.diff(h['phase']) != 0]
+        assert v['-'] == list(phase) and len(phase) == 1
+        assert v['-.'] == [100]
+        assert sorted(v['--'] + v['-']) == list(h['it'][h['end']])
+        assert [x.get_text() for x in fig.axes[1].get_legend().get_texts()] \
+            == ['lambda update', 'phase change', 'resume']
+        # only the kinds present
+        m = monitor(every=10)
+        N.train(x, t, method='adam', maxiter=40, monitor=m,
+                balance=balance.curv(inner=20))
+        fig = m.plot(vlines=True)
+        assert [x.get_text() for x in fig.axes[1].get_legend().get_texts()] \
+            == ['lambda update']
+
     def test_metrics_and_pickle(self):
         import pickle
         x, t = data()

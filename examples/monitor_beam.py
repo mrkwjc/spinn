@@ -78,16 +78,18 @@ if __name__ == "__main__":
     # Plots
     import matplotlib.pyplot as plt
 
-    # the course of one training: terms, loss, lambdas (dashed lines: lambda
-    # updates) and the error
-    m.plot(train=1, labels=['equation', 'deflection BC', 'slope BC'])
+    # the course of one training: terms, loss, lambdas and the error, with
+    # the lambda updates and the change of the phase as vertical lines
+    m.plot(train=1, labels=['equation', 'deflection BC', 'slope BC'],
+           vlines=True)
     # the error of all four trainings against time and iterations
     fig, ax = plt.subplots(1, 2, figsize=(12, 4))
     m.compare('err', ax=ax[0])
     m.compare('err', x='it', ax=ax[1])
     # the seeds
     r.monitor.compare('err', x='it')
-    # the resumed training: one history, the red dash-dot line is the resume
-    ra.monitor.plot(labels=['equation', 'deflection BC', 'slope BC'])
+    # the resumed training: one history, with the resume as a line too
+    ra.monitor.plot(labels=['equation', 'deflection BC', 'slope BC'],
+                    vlines=True)
 
     plt.show()

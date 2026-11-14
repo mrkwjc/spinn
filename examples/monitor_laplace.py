@@ -67,9 +67,9 @@ if __name__ == "__main__":
     fig, ax = plt.subplots(1, 2, figsize=(12, 4))
     m.compare('err', ax=ax[0])
     m.compare('err', x='it', ax=ax[1])
-    # the course of two trainings with 'curvsens': terms, loss, lambdas
-    # (dashed lines: lambda updates) and the error
-    m.plot(train=1, labels=labels)     # lbfgs
-    m.plot(train=4, labels=labels)     # adam
+    # the course of two trainings with 'curvsens': terms, loss, lambdas and
+    # the error, with the lambda updates and the change of the phase
+    m.plot(train=1, labels=labels, vlines=True)     # lbfgs
+    m.plot(train=4, labels=labels, vlines=True)     # adam
 
     plt.show()

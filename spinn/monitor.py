@@ -89,6 +89,31 @@ def _grid(ax, grid):
     ax.set_axisbelow(True)
 
 
+# vertical lines of 'plot': style and legend label of each kind
+_VLINES = (('updates', dict(color='0.35', lw=0.8, ls='--'), 'lambda update'),
+           ('phases', dict(color='k', lw=0.8, ls='-'), 'phase change'),
+           ('resumes', dict(color='tab:red', lw=0.8, ls='-.'), 'resume'))
+
+
+def _vlines(ax, it, end, phase, resume):
+    """Vertical lines in all axes 'ax' at the lambda updates (ends of the
+    runs), the changes of the phase and the resumes (the last record
+    before each), with a legend of the kinds present in the loss axes."""
+    from matplotlib.lines import Line2D
+    phases = it[:-1][np.diff(phase) != 0]
+    at = dict(phases=phases, resumes=it[:-1][np.diff(resume) > 0],
+              updates=[e for e in it[end] if e not in phases])
+    handles = []
+    for kind, style, label in _VLINES:
+        for a in ax:
+            for e in at[kind]:
+                a.axvline(e, **style)
+        if len(at[kind]):
+            handles.append(Line2D([], [], label=label, **style))
+    if handles:
+        ax[1].legend(handles=handles, fontsize='small')
+
+
 _MARKERS = ('o', 's', '^', 'v', 'D', '<', '>', 'p', '*', 'h', 'X', 'P')
 
 
@@ -305,17 +330,19 @@ class monitor:
                 h[k] = np.array([r.get(k, np.nan) for r in self.rows])
         return h
 
-    def plot(self, train=None, x='it', labels=None, grid=True, fname=None,
-             **kwargs):
+    def plot(self, train=None, x='it', labels=None, grid=True, vlines=False,
+             fname=None, **kwargs):
         """Terms, loss, lambdas and metrics of training 'train' (index,
         default the last one) against iterations (x='it') or time in seconds
         (x='t'). 'labels' names the terms (a list, one per term; default
         'term i'). Each term has its own marker (also its lambda); own
         'marker', 'ms' or 'markevery' apply to all curves. 'grid' draws a
         light grid (True at the powers of ten, 'both' also between them,
-        False none); the dashed vertical lines are the lambda updates, red
-        dash-dot lines the resumes. Other
-        keyword arguments go to every curve (matplotlib, e.g. ls=':').
+        False none). 'vlines' draws vertical lines (default False): at the
+        lambda updates, at the changes of the phase of the balancer (e.g.
+        'curvsens' from curv to sens) and at the resumes, explained in a
+        legend in the loss axes. Other keyword arguments go to every curve
+        (matplotlib, e.g. ls=':').
         Saved to 'fname' if given; returns the figure (axes: terms, loss,
         lambdas, metrics) to change further."""
         import matplotlib.pyplot as plt
@@ -348,15 +375,10 @@ class monitor:
         for a, name in zip(ax[3:], names):
             _markers(a.semilogy(it, np.abs(h[name][s]), **kwargs), kwargs)
             a.set_ylabel(name)
-        ends = it[h['end'][s]]
-        rs = h['resume'][s]
-        resumes = it[:-1][np.diff(rs) > 0]  # last record before a resume
         for a in ax:
             _grid(a, grid)
-            for e in ends:  # lambda updates
-                a.axvline(e, color='0.35', lw=0.8, ls='--')
-            for e in resumes:
-                a.axvline(e, color='tab:red', lw=1., ls='-.')
+        if vlines:
+            _vlines(ax, it, h['end'][s], h['phase'][s], h['resume'][s])
         ax[-1].set_xlabel('iteration' if x == 'it' else 'time [s]')
         fig.tight_layout()
         if fname is not None:
