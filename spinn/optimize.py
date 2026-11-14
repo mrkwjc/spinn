@@ -161,6 +161,14 @@ def _best(w, v, g, wb, vb, nst, tol, patience):
     return wb, vb, nst, reason
 
 
+def _strong(carry):
+    """The carry of a run without weak types: a loop can take a scalar in
+    weakly typed (e.g. in the state of optax.lbfgs) and return it strongly
+    typed, or the other way round, and its next chunk would compile
+    again."""
+    return jax.tree.map(lambda a: jnp.asarray(a, a.dtype), carry)
+
+
 class _optax(optimizer):
     """
     Base of the optimizers of optax, run in a jitted loop on the device of
@@ -183,11 +191,11 @@ class _optax(optimizer):
         w = jnp.asarray(w, jnp.asarray(model.w).dtype)
         v = model._loss(w, lmbd, *args)
         z = jnp.asarray(0)
-        carry = (w, self._init(w), z, z, z, z, w, v)
+        carry = _strong((w, self._init(w), z, z, z, z, w, v))
         k, status = 0, None
         while status is None:
             kmax = n if callback is None else min(k + self.chunk, n)
-            carry = self._run(model, lmbd, args, carry, kmax)
+            carry = _strong(self._run(model, lmbd, args, carry, kmax))
             k, reason = int(carry[2]), int(carry[3])
             if callback is not None:
                 try:

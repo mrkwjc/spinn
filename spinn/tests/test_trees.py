@@ -645,6 +645,13 @@ class TestOptimize:
             r = N.train(x, t, method='lbfgs', maxiter=600,
                         balance=balance.curv(inner=100))
         assert r.nouter > 1 and optimize._lbfgs_run._cache_size() == n
+        # runs in chunks (a monitor, every 10 iterations): the chunks after
+        # the first are not compiled again
+        N = fit2([1, 8, 1], f=jnp.tanh, key=4)
+        r = N.train(x, t, method=optimize.lbfgs(tol=0.), maxiter=100,
+                    balance=balance.curv(inner=50), monitor=10)
+        assert len(r.monitor.rows) > 5
+        assert optimize._lbfgs_run._cache_size() == n
 
     def test_adam(self):
         x, t = data()
@@ -748,6 +755,11 @@ class TestOptimize:
             r = N.train(x, t, method=optimize.adam(lr=lr), maxiter=300,
                         balance=balance.curv(inner=100))
         assert r.nouter > 1 and optimize._adam_run._cache_size() == n
+        N = fit2([1, 8, 1], f=jnp.tanh, key=4)    # runs in chunks
+        r = N.train(x, t, method='adam', maxiter=100,
+                    balance=balance.curv(inner=50), monitor=10)
+        assert len(r.monitor.rows) > 5
+        assert optimize._adam_run._cache_size() == n
 
 
 def swish(x):       # module-level activation, saved by its dotted path
