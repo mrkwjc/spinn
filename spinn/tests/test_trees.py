@@ -919,6 +919,10 @@ class fit2n(fit2):
         return float(jnp.sum(self.w**2))
 
 
+class singlen(single):
+    norm = fit2n.norm
+
+
 class TestMonitor:
     def test_rows(self):
         x, t = data()
@@ -1117,6 +1121,59 @@ class TestMonitor:
         assert np.all(np.isnan(h['lmbd'][s, 1]))
         assert not np.any(np.isnan(h['terms'][~s]))
         assert not np.any(np.isnan(h['loss']))
+
+    def test_save_load(self, tmp_path):
+        import json
+        x, t = data()
+        fname = str(tmp_path/'m.mon')
+        calls = []
+
+        def err(P):     # interrupts the third training at its 3rd record
+            # (not stored)
+            calls.append(1)
+            if len(calls) == 8:
+                raise RuntimeError('stop')
+            return float(jnp.sum(P.w**2))
+        m = monitor(every=10, keepw=True, metrics={'a': err, 'b': 'norm'})
+        fit2n([1, 8, 1], key=1).train(x, t, maxiter=20, monitor=m)
+        singlen([1, 8, 1], key=1).train(x, t, maxiter=10, monitor=m,
+                                        seeds=[3])
+        with pytest.raises(RuntimeError, match='stop'):
+            fit2n([1, 8, 1], key=2).train(x, t, maxiter=100, monitor=m)
+        m.save(fname)   # no result of the interrupted training
+        m2 = monitor.load(fname)
+        h, h2 = m.history, m2.history
+        assert set(h) == set(h2)
+        assert h['train'].tolist() == [0]*3 + [1]*2 + [2]*2
+        for k in h:
+            np.testing.assert_array_equal(h2[k], h[k])
+        assert set(m2.final) == {None, 3}
+        for s in m.final:
+            np.testing.assert_array_equal(m2.final[s], m.final[s])
+        assert m2.info == json.loads(json.dumps(m.info))
+        assert 'nit' not in m2.info[-1]         # interrupted
+        assert m2.metrics == {'a': None, 'b': 'norm'}
+        assert (m2.every, m2.keepw, m2._ntrain) == (10, True, 2)
+        # readable with numpy alone
+        with np.load(fname, allow_pickle=False) as z:
+            meta = json.loads(str(z['__meta__']))
+        assert meta['format'] == 'spinn.monitor'
+        # trains further after its metric function is set again
+        m2.metrics['a'] = lambda P: 0.
+        fit2n([1, 8, 1], key=1).train(x, t, maxiter=10, monitor=m2)
+        assert m2.history['train'][-1] == 3 and m2.history['a'][-1] == 0.
+        # the monitor of a saved result
+        r = fit2([1, 8, 1], key=1).train(x, t, maxiter=10, monitor=10)
+        r.save(fname)
+        np.testing.assert_array_equal(monitor.load(fname).history['loss'],
+                                      r.monitor.history['loss'])
+        r = fit2([1, 8, 1], key=1).train(x, t, maxiter=10, monitor=False)
+        r.save(fname)
+        with pytest.raises(ValueError, match='no monitor'):
+            monitor.load(fname)
+        fit2([1, 8, 1], key=1).save(fname)
+        with pytest.raises(ValueError, match="not 'spinn.monitor'"):
+            monitor.load(fname)
 
     def test_tmax(self):
         x, t = data()

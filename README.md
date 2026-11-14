@@ -74,6 +74,7 @@ m = monitor(every=100, metrics={'err': lambda P: error(P)})
 P.train(x, 0.2, f0, bx, monitor=m)
 m.history['terms']    # numpy arrays, one row per record
 m.plot()
+m.save('heat.mon')    # monitor.load('heat.mon') reads it back
 ```
 
 A training is continued with `res = P.resume(res, maxiter=5000)`: from where

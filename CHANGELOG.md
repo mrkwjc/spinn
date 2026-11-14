@@ -62,7 +62,10 @@
   training (against iterations or time) and `m.compare('err')` a quantity
   of all trainings in one figure. The monitor is not copied, so it can be
   read also after an interruption. `train(..., monitor=200)` creates one
-  (`every=200`), returned in `res.monitor`.
+  (`every=200`), returned in `res.monitor`. `m.save(fname)` saves a monitor
+  alone (also after an interruption, when there is no result) to an NPZ file
+  readable with numpy alone; `monitor.load(fname)` reads it back, or the
+  monitor of a result file.
 - **Continuing a training:** `P.resume(res, maxiter=5000)` continues the
   training that returned `res`, from its weights and with the state of its
   balancer and optimizer, on its data (or new data passed as arguments).

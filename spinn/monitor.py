@@ -13,6 +13,8 @@ own metrics. It also keeps the final network weights of each training.
     m.history['terms']       # numpy arrays, one row per record
     m.final                  # final weights of each training, by seed
     m.plot()
+    m.save('beam.mon')       # also after an interruption (no result then)
+    m = monitor.load('beam.mon')     # or the monitor of a saved result
 
 'history' has one entry per record (numpy arrays):
 
@@ -44,7 +46,9 @@ A monitor pickles as plain data: history, final weights, info and
 options. Metric functions are not kept (they may not pickle, or change
 with the code): after loading their entries in 'metrics' are None, their
 recorded values remain; set the functions again to train further with the
-monitor. Metrics given as method names are kept. Trainings of problems
+monitor. Metrics given as method names are kept. 'save' writes the same
+plain data to a numpy NPZ file, readable with numpy alone; 'load' reads it
+back (also the monitor of a result file of 'res.save'). Trainings of problems
 with fewer terms than others in one monitor have nan in the extra columns
 of 'terms' and 'lmbd' (what term i means is up to the problem).
 
@@ -75,6 +79,8 @@ import time
 import numpy as np
 
 __all__ = ['monitor']
+
+FORMAT, VERSION = 'spinn.monitor', 1
 
 
 def _grid(ax, grid):
@@ -288,6 +294,33 @@ class monitor:
                                 for k, f in state['metrics'].items()}
         state['_model'] = state['_args'] = None
         return state
+
+    def save(self, fname):
+        """Save the monitor to the file 'fname' (NPZ, readable with numpy
+        alone; see spinn.storage): options (metric functions by name
+        only), history, final weights and info. Also during or after an
+        interrupted training, when there is no result to save."""
+        from spinn import storage
+        arrays = {}
+        storage.save(fname, FORMAT, VERSION,
+                     dict(monitor=self._plain(arrays)), arrays)
+
+    @classmethod
+    def load(cls, fname):
+        """Monitor saved by 'save', or the monitor of a result saved by
+        'res.save'. Metric functions are None, as after a pickle."""
+        from spinn import storage
+        from spinn.result import FORMAT as RESULT
+        try:
+            arrays, meta = storage.load(fname, FORMAT)
+        except ValueError as e:
+            try:
+                arrays, meta = storage.load(fname, RESULT)
+            except ValueError:
+                raise e from None
+            if meta['monitor'] is None:
+                raise ValueError("%s: the result has no monitor" % fname)
+        return cls._from_plain(meta['monitor'], arrays)
 
     def _timeout(self):
         return (self.tmax is not None and
