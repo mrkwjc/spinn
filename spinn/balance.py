@@ -317,15 +317,18 @@ class sens(balancer):
         def hv(V):
             V = _like(model, V)
             return np.asarray(_losshv(model, wj, lmj, V, *args), np.float64)
-        # largest eigenvalue of H (power iterations) sets the damping
-        v = np.random.default_rng(self.seed).standard_normal((1, wj.size))
+        # largest eigenvalue of H (power iterations) sets the damping; the
+        # vector is the first row of as many rows as terms (the others
+        # zero), so that '_losshv' is compiled once, for these and 'cg'
+        V = np.zeros((len(T), wj.size))
+        V[0] = np.random.default_rng(self.seed).standard_normal(wj.size)
         hmax = 0.
         for _ in range(30):
-            u = hv(v)
+            u = hv(V)[0]
             hmax = np.linalg.norm(u)
             if not hmax > 0:
                 break
-            v = u/hmax
+            V[0] = u/hmax
         mu = self.damp*hmax
         dW = cg(lambda V: hv(V) + mu*V, -lm[:, None]*G, self.maxcg)
         x = args[0]
