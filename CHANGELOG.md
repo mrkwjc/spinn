@@ -31,7 +31,10 @@
   schedule over the whole training, e.g. `adam(lr=1e-2)`; its runs do not
   converge, so balancers with phases, e.g. `'curvsens'`, move on once the
   lambdas settle: option `anytime` of the optimizers; by default it runs
-  2000 iterations between lambda updates and 30000 in all),
+  2000 iterations between lambda updates and 30000 in all; option `warmup`,
+  100 by default, raises the learning rate linearly over the first steps of
+  each run, at most a tenth of the run, as its moments start from zero in
+  each run),
   `minimize` (any scipy method, e.g. `minimize(method='BFGS', tol=1e-8)`),
   and your own optimizer as a subclass of `spinn.optimize.optimizer`.
   `method` accepts a name, a class or an instance. The optimizer sets the

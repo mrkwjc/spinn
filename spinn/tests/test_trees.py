@@ -4,6 +4,7 @@ import random
 import jax
 import jax.numpy as jnp
 import numpy as np
+import optax
 import pytest
 from spinn import utils, graphs, spinn, balance, optimize, monitor, result
 from spinn import training
@@ -738,15 +739,54 @@ class TestOptimize:
         assert r.nouter == 3 and o._k == 0
         assert [int(k) for k in steps] == list(range(30))
 
+    def test_adam_warmup(self):
+        # the learning rate rises from lr/warmup to lr in the first steps of
+        # each run, at most a tenth of the run; the first step of Adam is
+        # about lr*sign(gradient)
+        x, t = data()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        lmbd = jnp.ones(2, N.w.dtype)
+        assert optimize.adam.warmup == 100
+
+        def path(warmup, n, nrun=1000):  # weights after n steps of a run
+            o = optimize.adam(lr=1e-2, warmup=warmup)
+            z = jnp.asarray(0)
+            c = (N.w, o._init(N.w), z, z, z, z, N.w,
+                 N._loss(N.w, lmbd, x, t))
+            ws = [N.w]
+            for k in range(1, n + 1):
+                c = o._run(N, lmbd, (x, t), c, k, nrun)
+                ws.append(c[0])
+            return ws
+
+        def first(warmup, nrun=1000):
+            ws = path(warmup, 1, nrun)
+            return float(jnp.max(jnp.abs(ws[1] - ws[0])))
+        np.testing.assert_allclose(first(0), 1e-2, rtol=1e-3)
+        np.testing.assert_allclose(first(None), 1e-2, rtol=1e-3)
+        np.testing.assert_allclose(first(1), 1e-2, rtol=1e-3)
+        np.testing.assert_allclose(first(10), 1e-3, rtol=1e-3)
+        # capped at a tenth of the run: 2 steps in a run of 20, none in 5
+        np.testing.assert_allclose(first(100, 20), 5e-3, rtol=1e-3)
+        np.testing.assert_allclose(first(100, 5), 1e-2, rtol=1e-3)
+        # the ramp: step k is rate_k times Adam's update along the path
+        ws = path(10, 12)
+        tx = optax.scale_by_adam()
+        st = tx.init(N.w)
+        for k, (a, b) in enumerate(zip(ws, ws[1:])):
+            u, st = tx.update(N._lossg(a, lmbd, x, t), st)
+            np.testing.assert_allclose(a - b, 1e-2*min(1., (k + 1)/10.)*u,
+                                       rtol=1e-4, atol=1e-9)
+
     def test_adam_compiles_once(self):
         x, t = data()
         N = fit2([1, 8, 1], f=jnp.tanh, key=1)
         N.train(x, t, method='adam', maxiter=50)
         n = optimize._adam_run._cache_size()
-        for key, lr in ((2, 1e-2), (3, 1e-3)):
+        for key, lr, warmup in ((2, 1e-2, 0), (3, 1e-3, 50)):
             N = fit2([1, 8, 1], f=jnp.tanh, key=key)
-            r = N.train(x, t, method=optimize.adam(lr=lr), maxiter=300,
-                        balance=balance.curv(inner=100))
+            r = N.train(x, t, method=optimize.adam(lr=lr, warmup=warmup),
+                        maxiter=300, balance=balance.curv(inner=100))
         assert r.nouter > 1 and optimize._adam_run._cache_size() == n
 
 

@@ -166,11 +166,11 @@ class _optax(optimizer):
     Base of the optimizers of optax, run in a jitted loop on the device of
     the network (no copies to the host between iterations; in the
     precision of the network, float32 by default). Subclasses define
-    '_init(w)' (optax state) and '_run(model, lmbd, args, carry, kmax)'
-    (steps until iteration 'kmax' or a stop; carry: weights, state,
-    iteration, stop reason, function evaluations, steps without
-    improvement, best weights, best loss). The best weights of the run are
-    returned.
+    '_init(w)' (optax state) and '_run(model, lmbd, args, carry, kmax, n)'
+    (steps until iteration 'kmax' or a stop, in a run of 'n' iterations;
+    carry: weights, state, iteration, stop reason, function evaluations,
+    steps without improvement, best weights, best loss). The best weights
+    of the run are returned.
     """
     tol = 1e-10
     patience = None
@@ -187,7 +187,7 @@ class _optax(optimizer):
         k, status = 0, None
         while status is None:
             kmax = n if callback is None else min(k + self.chunk, n)
-            carry = self._run(model, lmbd, args, carry, kmax)
+            carry = self._run(model, lmbd, args, carry, kmax, n)
             k, reason = int(carry[2]), int(carry[3])
             if callback is not None:
                 try:
@@ -268,7 +268,7 @@ class lbfgs(_optax):
     def _init(self, w):
         return _lbfgs_init(w, self.memory_size)
 
-    def _run(self, model, lmbd, args, carry, kmax):
+    def _run(self, model, lmbd, args, carry, kmax, n):
         return _lbfgs_run(model, lmbd, args, carry, kmax, self.tol,
                           self._patience(), self.memory_size)
 
@@ -280,9 +280,10 @@ def _adam_init(w):
 
 @partial(jax.jit, static_argnames=('schedule',))
 def _adam_run(model, lmbd, args, carry, kmax, k0, tol, patience, lr,
-              schedule, b1, b2, eps):
+              schedule, b1, b2, eps, warmup):
     """Steps of Adam until iteration 'kmax' or a stop; the learning rate is
-    'lr', or schedule(k0 + k) if a schedule is given."""
+    'lr', or schedule(k0 + k) if a schedule is given, times
+    min(1, (k + 1)/warmup) in the first 'warmup' steps of the run."""
     tx = optax.scale_by_adam(b1=b1, b2=b2, eps=eps)
     vg = jax.value_and_grad(lambda w: model._loss(w, lmbd, *args))
 
@@ -295,6 +296,8 @@ def _adam_run(model, lmbd, args, carry, kmax, k0, tol, patience, lr,
         wb, vb, nst, reason = _best(w, v, g, wb, vb, nst, tol, patience)
         u, st = tx.update(g, st)
         rate = lr if schedule is None else schedule(k0 + k)
+        rate = rate*jnp.where(warmup > 0, jnp.minimum(
+            1., (k + 1.)/jnp.maximum(warmup, 1.)), 1.)
         w = w - jnp.asarray(rate, w.dtype)*u
         return w, st, k + 1, reason, nfev + 1, nst, wb, vb
     return jax.lax.while_loop(cond, step, carry)
@@ -316,6 +319,15 @@ class adam(_optax):
                    (default 1e-10)
         patience - the run stops after this many steps in a row without
                    improvement (default None, no stop)
+        warmup   - the learning rate rises linearly from lr/warmup to lr in
+                   the first 'warmup' steps of each run, at most a tenth of
+                   the run (default 100; 0: none). The moments start from
+                   zero in each run, so the first steps are about
+                   lr*sign(gradient) for every weight, however small the
+                   gradient: without warmup this jump can throw a nearly
+                   converged network so far that the run never gets back
+                   below its starting loss, and the training stalls at
+                   those weights
         chunk    - iterations between calls of 'callback' (default 100)
         anytime  - (default True) see 'optimizer'; e.g. 'curvsens' moves to
                    sensitivities once the curv lambdas settle, and the last
@@ -339,17 +351,19 @@ class adam(_optax):
     b1 = .9
     b2 = .999
     eps = 1e-8
+    warmup = 100
     _k = 0
 
     def _init(self, w):
         return _adam_init(w)
 
-    def _run(self, model, lmbd, args, carry, kmax):
+    def _run(self, model, lmbd, args, carry, kmax, n):
         sched = self.lr if callable(self.lr) else None
         lr = 0. if callable(self.lr) else float(self.lr)
+        warmup = min(float(self.warmup or 0), n/10.)  # (a run of n steps)
         return _adam_run(model, lmbd, args, carry, kmax, self._k, self.tol,
                          self._patience(), lr, sched, self.b1, self.b2,
-                         self.eps)
+                         self.eps, warmup)
 
     def _done(self, k):
         self._k += k
