@@ -62,16 +62,17 @@ if __name__ == "__main__":
             k, hs['err'][hs['seed'] == k][-1],
             '  <- kept (lowest loss)' if k == r.seed else ''))
 
-    # 3. Adam with 10000 iterations, then 20000 more by 'resume': it ends
-    # where the training of part 1 with 30000 iterations at once ended
+    # 3. Adam with 10000 iterations, then up to 20000 more by 'resume': it
+    # ends where the training of part 1 at once ended (that one stops before
+    # 30000 iterations if two runs in a row make no progress)
     B = beam(mlgraph((1, 32, 1)), initx=x, key=1)
     ra = B.train(x, q, bx, EI, method='adam', balance='curvsens',
                  maxiter=10000, monitor=monitor(metrics={'err': err}))
-    print('%-34s error %.1e' % ('adam, 10000 iterations:', err(B)))
+    print('%-28s %6d iterations  error %.1e' % ('adam:', ra.nit, err(B)))
     ra = B.resume(ra, maxiter=20000)
-    print('%-34s error %.1e' % ('resumed, 30000 iterations:', err(B)))
-    print('%-34s error %.1e' % ('part 1, 30000 iterations at once:',
-                                h['err'][h['train'] == 3][-1]))
+    print('%-28s %6d iterations  error %.1e' % ('resumed:', ra.nit, err(B)))
+    print('%-28s %6d iterations  error %.1e' % (
+        'part 1, at once:', m.info[3]['nit'], h['err'][h['train'] == 3][-1]))
 
     #
     # Plots
