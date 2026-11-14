@@ -63,7 +63,7 @@ are instances (`from spinn import optimize`, then
 
 Activations of the hidden layers are set with `f`: a name from `jax.nn` or
 `jax.numpy` (`f='tanh'`, `f='sin'`, `f='gelu'`; softplus by default), a
-function, or one per layer. Networks are saved with `P.dump(fname)` and
+function, or one per layer. Networks are saved with `P.save(fname)` and
 restored with `heat.load(fname)`; see `help(spinn)` for details.
 
 The course of a training is recorded by a monitor:

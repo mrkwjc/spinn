@@ -524,7 +524,7 @@ class TestTrain:
         M = pickle.loads(pickle.dumps(N))
         np.testing.assert_allclose(M(x), N(x))
         fname = str(tmp_path/'n.pkl')
-        N.dump(fname)
+        N.save(fname)
         M = fit2.load(fname)
         np.testing.assert_allclose(M(x), N(x))
 
@@ -1115,7 +1115,7 @@ class TestResult:
         np.testing.assert_allclose(result.load(fname, model=False).network(
             x), M(x))
         with pytest.raises(ValueError, match="holds 'spinn.network'"):
-            M.dump(fname)
+            M.save(fname)
             result.load(fname)
 
 
@@ -1144,12 +1144,12 @@ class TestActivations:
         with pytest.raises(ValueError, match='unknown activation'):
             spinn([1, 8, 1], f='nosuchfunction')
 
-    def test_dump_load(self, tmp_path):
+    def test_save_load(self, tmp_path):
         x, _ = data()
         fname = str(tmp_path/'n.net')
         for f, p in (('gelu', None), ('elu', (0.5,)), (swish, None)):
             N = spinn([1, 8, 1], f=f, p=p, initx=x, key=1)
-            N.dump(fname)
+            N.save(fname)
             M = spinn.load(fname)
             assert M.f == N.f and M.wshp == N.wshp
             assert M.w.dtype == N.w.dtype
@@ -1169,9 +1169,13 @@ class TestActivations:
         storage.save(fname, 'other', 1, {})
         with pytest.raises(ValueError, match="holds 'other'"):
             spinn.load(fname)
+        # the old name still works, with a warning
+        with pytest.warns(FutureWarning, match="renamed to 'save'"):
+            N.dump(fname)
+        np.testing.assert_allclose(spinn.load(fname)(x), N(x))
 
     def test_load_old_pickle(self, tmp_path):
-        # files of 'dump' up to spinn 0.3 (pickled lists) still load
+        # files of 'dump' of spinn 0.3 (pickled lists) still load
         import pickle
         x, _ = data()
         N = spinn([1, 8, 1], f='elu', p=(0.5,), initx=x, key=1)
@@ -1191,7 +1195,7 @@ class TestActivations:
         N = spinn([1, 8, 1], f=lambda x: jnp.sin(3*x), initx=x, key=1)
         np.testing.assert_allclose(N(x)[:, 0], N(x)[:, 0])   # works
         with pytest.raises(ValueError, match='layer 1 is a lambda'):
-            N.dump(str(tmp_path/'n.pkl'))
+            N.save(str(tmp_path/'n.pkl'))
 
 
 if __name__ == "__main__":

@@ -67,7 +67,7 @@ class spinn:
               name from jax.nn or jax.numpy ('tanh', 'sin', 'gelu', ...), a
               function (stored by its name: jnp.tanh as 'tanh', own
               functions as 'module.function'), or a lambda (works, but the
-              network cannot be saved by 'dump')
+              network cannot be saved by 'save')
     p       - parameters of the activations, passed as f(x, *p): one tuple
               for the hidden layers, a list of 3 or one per layer, e.g.
               f='elu', p=(0.5,)
@@ -637,7 +637,7 @@ class spinn:
                                                cls._tree_flatten,
                                                cls._tree_unflatten)
 
-    def dump(self, fname):
+    def save(self, fname):
         """
         Save the network (weights, activations and their parameters,
         structure) to the file 'fname', readable by 'load'. The file is a
@@ -653,8 +653,14 @@ class spinn:
                     "from jax.nn / jax.numpy" % i)
         storage.save(fname, 'spinn.network', 1, *self._plain())
 
+    def dump(self, fname):
+        """Old name of 'save' (deprecated)."""
+        warnings.warn("'dump' is renamed to 'save'", FutureWarning,
+                      stacklevel=2)
+        self.save(fname)
+
     def _plain(self):
-        """The network as JSON metadata and arrays (for 'dump')."""
+        """The network as JSON metadata and arrays (for 'save')."""
         (w, p), aux = self._tree_flatten()
         arrays = {'w': np.asarray(w)}
         for i, pi in enumerate(p):
@@ -680,17 +686,17 @@ class spinn:
     @classmethod
     def load(cls, fname):
         """
-        Network saved by 'dump' (as an instance of this class, e.g.
+        Network saved by 'save' (as an instance of this class, e.g.
         heat.load(fname)). Activations given as 'module.function' need the
         module to be importable. Files of spinn 0.3 and older (pickled
-        lists) still load, with a warning; save them again with 'dump'.
+        lists) still load, with a warning; save them again with 'save'.
         """
         if storage.isnpz(fname):
             arrays, meta = storage.load(fname, 'spinn.network')
             return cls._from_plain(meta, arrays)
-        warnings.warn("%s is in the old format of 'dump' (pickle), which "
+        warnings.warn("%s is in the old format of spinn 0.3 (pickle), which "
                       "will not be read in the future; save it again with "
-                      "'dump'" % fname, FutureWarning, stacklevel=2)
+                      "'save'" % fname, FutureWarning, stacklevel=2)
         with open(fname, 'rb') as f:
             (children, aux_data) = pickle.load(f)
         # make arrays again
