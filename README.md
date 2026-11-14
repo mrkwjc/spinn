@@ -97,5 +97,6 @@ Two options lower the error at a higher cost:
 
 More problems are in `examples/`: beams (with a support, and a cantilever),
 the heat equation, a heated plate in physical units and the Laplace
-equation, all compared with exact solutions; `monitor.py` records and
-compares trainings of the beam, `results.py` saves, loads and resumes one.
+equation, all compared with exact solutions; `monitor_beam.py` records and
+compares trainings of the beam, `monitor_laplace.py` those of the Laplace
+equation, `results.py` saves, loads and resumes one.
