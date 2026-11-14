@@ -75,7 +75,7 @@ class trainer:
         self.nit = self.nfev = self.k = self.short = self.phase = 0
         self.last = False       # the balancer has no next phase
         self.pending = False    # lambda update after the last run to do
-        self.lastrun = None     # (its iterations, success)
+        self.lastrun = None     # (its iterations, success, slow)
         self.resume = 0         # number of resumes so far
         self.monitor = None     # monitor which recorded it
         self.mtrain = None      # its training number in that monitor
@@ -110,9 +110,10 @@ class trainer:
     def _lambdas(self, model, w, current):  # current: lambdas in the loss
         return np.asarray(self.b(model, w, current, *self.args), np.float64)
 
-    def _decide(self, model, w, rnit, success):
-        """After a run of 'rnit' iterations: new lambdas, next phase; True
-        if the training is done."""
+    def _decide(self, model, w, rnit, success, slow=False):
+        """After a run of 'rnit' iterations ('slow': it lowered the loss by
+        at most the fraction 'advance' of the optimizer): new lambdas, next
+        phase; True if the training is done."""
         # no progress
         done = rnit == 0 or self.short >= 2
         settled = False
@@ -122,10 +123,10 @@ class trainer:
             settled = np.max(np.abs(new/self.lmbd - 1.)) < 0.1
             # converged and lambdas settled
             done = success and settled
-        # an 'anytime' optimizer (e.g. adam, its runs do not converge) moves
-        # to the next phase once the lambdas settle, and in the last phase
-        # goes on
-        if done or (settled and self.opt.anytime and not self.last):
+        # runs which do not converge (e.g. adam, or lbfgs cut at 'inner')
+        # move to the next phase once the lambdas settle and the progress
+        # of the run slows down; in the last phase they go on
+        if done or (settled and slow and not self.last):
             if not self.last and self.b.advance():  # next phase, if any
                 self.short = 0
                 self.phase += 1
@@ -208,9 +209,14 @@ class trainer:
                     state.update(calls=0, nit=self.nit, run=self.k + 1,
                                  lmbd=self.lmbd, phase=self.phase,
                                  end=self.nit + n)
+                f0 = float(np.sum(self.lmbd*self._terms(model, w)))
                 res = opt(model, w, jnp.asarray(self.lmbd, dtype),
                           *self.args, n=n, callback=callback)
                 stuck = np.array_equal(res.x, w)  # the start was the best
+                # the loss (with the lambdas of the run) lowered by at most
+                # the fraction 'advance' (0: never slow, converged runs only)
+                f1 = float(np.sum(self.lmbd*self._terms(model, res.x)))
+                slow = opt.advance > 0 and f0 - f1 <= opt.advance*f0
                 w = res.x
                 self.nit += res.nit
                 self.nfev += res.nfev
@@ -238,9 +244,9 @@ class trainer:
                 # the update after this run is left to the next fit
                 if res.status == 99 or self.nit >= end or self.k >= b.outer:
                     self.pending = True
-                    self.lastrun = (res.nit, res.success)
+                    self.lastrun = (res.nit, res.success, slow)
                     break
-                if self._decide(model, w, res.nit, res.success):
+                if self._decide(model, w, res.nit, res.success, slow):
                     if self.short >= 2:
                         res.message = 'no progress in the last two runs'
                     break

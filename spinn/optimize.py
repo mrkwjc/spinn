@@ -51,10 +51,12 @@ class optimizer:
 
         tol     - tolerance of the stop criteria (meaning depends on the
                   optimizer)
-        anytime - True for optimizers whose runs do not converge but improve
-                  for as long as they run (e.g. adam): 'train' moves to the
-                  next phase of the balancer once the lambdas settle, not
-                  only after a converged run (default False)
+        advance - 'train' moves to the next phase of the balancer (e.g.
+                  'curvsens' from curv to sens) once the lambdas settle and
+                  the run either converged or lowered the loss by at most
+                  this fraction (default 0.03; 1: settled lambdas are
+                  enough, e.g. adam, whose runs do not converge; 0: only
+                  after a converged run)
         inner   - default iterations between lambda updates of the
                   balancer, used if the balancer does not set them (500)
         maxiter - default of 'maxiter' of 'train', the total number of
@@ -63,7 +65,7 @@ class optimizer:
                   (spinn.monitor), if it does not set them (100)
     """
     tol = None
-    anytime = False
+    advance = 0.03
     inner = 500
     maxiter = 15000
     every = 100
@@ -364,9 +366,9 @@ class adam(_optax):
                    warmup keeps such runs moving, though in tests not to a
                    better accuracy
         chunk    - iterations between calls of 'callback' (default 100)
-        anytime  - (default True) see 'optimizer'; e.g. 'curvsens' moves to
-                   sensitivities once the curv lambdas settle, and the last
-                   phase runs until 'maxiter'
+        advance  - (default 1) see 'optimizer': its runs do not converge,
+                   so e.g. 'curvsens' moves to sensitivities once the curv
+                   lambdas settle
         inner    - iterations between lambda updates (default 2000, if the
                    balancer does not set them)
         maxiter  - default of 'maxiter' of 'train' (30000; Adam needs more
@@ -379,7 +381,7 @@ class adam(_optax):
     of the run are returned.
     """
     lr = 1e-3
-    anytime = True
+    advance = 1.
     inner = 2000
     maxiter = 30000
     every = 500

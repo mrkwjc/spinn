@@ -31,9 +31,10 @@ attributes, which can be changed per instance:
 between updates (every training starts afresh). A balancer with
 several phases moves to the next one in 'advance': when 'train' would
 stop by the rules above (lambdas settled, short runs) it calls 'advance'
-and goes on if it returns True. With an 'anytime' optimizer (e.g. adam,
-whose runs do not converge) settled lambdas are enough to advance, and the
-last phase runs until 'maxiter'.
+and goes on if it returns True. It also advances when the lambdas settle
+and the run, without converging, lowered the loss by at most the fraction
+'advance' of the optimizer (3%; adam: 1, as its runs do not converge,
+settled lambdas are enough).
 
 In 'train' a balancer is given by name or expression (see below), class
 (curv), instance (curv(lmax=1e3)), as a sequence of fixed lambdas or None

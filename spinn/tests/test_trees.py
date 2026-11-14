@@ -729,7 +729,7 @@ class TestOptimize:
         x, t = data()
 
         class still(optimize.optimizer):
-            anytime = True
+            advance = 1.
             inner = 20
             moves = (False,)    # cycled: does the run move the weights?
 
@@ -762,9 +762,9 @@ class TestOptimize:
         assert r.nouter == 10 and r.nit == 200
         assert r.message == 'maximum number of iterations reached'
 
-    def test_anytime(self):
-        # adam's runs do not converge: settled weights move to the next
-        # phase, and the last phase runs until maxiter
+    def test_advance(self):
+        # adam's runs do not converge (advance=1): settled lambdas move to
+        # the next phase, and the last phase runs until maxiter
         x, t = data()
         calls = []
 
@@ -782,12 +782,43 @@ class TestOptimize:
         assert calls[:2] == [2., 2.] and set(calls[2:]) == {5.}
         assert r.nit == 200 and r.nouter == 10
         np.testing.assert_allclose(r.lmbd, [1., 5.])
-        # not anytime: no run converges, the first phase is kept
+        # advance=0: no run converges, the first phase is kept
         calls.clear()
         N = fit2([1, 8, 1], f=jnp.tanh, key=1)
-        r = N.train(x, t, method=optimize.adam(anytime=False), maxiter=200,
+        r = N.train(x, t, method=optimize.adam(advance=0.), maxiter=200,
                     balance=b)
         assert set(calls) == {2.} and r.nit == 200
+
+        # a run which lowers the loss by at most 'advance' (here: one
+        # which jumps to trained weights, then runs which move them by a
+        # tiny step) with settled lambdas moves to the next phase
+        M = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        M.train(x, t, method='lbfgs', maxiter=500)
+
+        class jump(optimize.optimizer):
+            inner = 20
+            k = 0
+
+            def __call__(self, model, w, lmbd, *args, n, callback=None):
+                self.k += 1
+                x = (np.asarray(M.w, np.float64) if self.k == 1
+                     else np.asarray(w, np.float64) + 1e-7)
+                return optimize.OptimizeResult(
+                    x=x, fun=float(model._loss(x, lmbd, *args)), nit=n,
+                    nfev=n, status=1, success=False, message='')
+        for adv, moves in ((0.03, True), (0., False)):  # 0: converged only
+            N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+            r = N.train(x, t, method=jump(advance=adv), maxiter=100,
+                        balance=balance.phases(const([1., 2.]),
+                                               const([1., 5.])))
+            assert (r.state.phase == 1) == moves
+        m = monitor()
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        N.train(x, t, method=jump(), maxiter=100, monitor=m,
+                balance=balance.phases(const([1., 2.]), const([1., 5.])))
+        hm = m.history
+        # the first run (the jump) does not advance, the second does
+        assert list(hm['phase'][hm['end']][:3]) == [0, 0, 1]
 
         # 'advance' returns False only once, so a balancer which changes its
         # state in 'advance' anyway does not move past its last phase

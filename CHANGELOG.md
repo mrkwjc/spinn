@@ -30,16 +30,21 @@
   `approx_dec_rtol` (1e-3, the switch of optax's line search to the
   approximate Wolfe conditions, which work in float32 near the end of a
   training; optax's 1e-6 stops trainings early: 2–10× larger errors on the
-  examples), `chunk`),
+  examples), `chunk`). Option `advance` of the optimizers (0.03): a
+  balancer with phases also moves to the next one when the lambdas settle
+  and a run, without converging, lowered the loss by at most this fraction
+  (L-BFGS runs are cut at `inner` iterations and often do not converge;
+  waiting for a converged run left e.g. `'curvsens'` in its first phase),
   `adam` (Adam of optax on the device; learning rate `lr`, a number or a
   schedule over the whole training, e.g. `adam(lr=1e-2)`; its runs do not
   converge, so balancers with phases, e.g. `'curvsens'`, move on once the
-  lambdas settle: option `anytime` of the optimizers; by default it runs
-  2000 iterations between lambda updates and 30000 in all; option
-  `warmup`, off by default, raises the learning rate linearly over the
-  first steps of each run, at most a tenth of the run, as its moments start
-  from zero in each run; two runs in a row which return the weights they started from
-  end the phase of the balancer, in the last phase the training),
+  lambdas settle: option `advance` of the optimizers, 1 for adam; by
+  default it runs 2000 iterations between lambda updates and 30000 in all;
+  option `warmup`, off by default, raises the learning rate linearly over
+  the first steps of each run, at most a tenth of the run, as its moments
+  start from zero in each run; two runs in a row which return the weights
+  they started from end the phase of the balancer, in the last phase the
+  training),
   `minimize` (any scipy method, e.g. `minimize(method='BFGS', tol=1e-8)`),
   and your own optimizer as a subclass of `spinn.optimize.optimizer`.
   `method` accepts a name, a class or an instance. The optimizer sets the
