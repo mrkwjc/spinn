@@ -227,10 +227,22 @@ def _lbfgs_init(w, memory_size):
     return optax.lbfgs(memory_size=memory_size).init(w)
 
 
+def _lbfgs(memory_size, approx_dec_rtol):
+    """optax.lbfgs with its zoom line search ('approx_dec_rtol' may be
+    traced: optax uses it in arithmetic only, so its value does not
+    recompile)."""
+    return optax.lbfgs(memory_size=memory_size,
+                       linesearch=optax.scale_by_zoom_linesearch(
+                           max_linesearch_steps=20,
+                           initial_guess_strategy='one',
+                           approx_dec_rtol=approx_dec_rtol))
+
+
 @partial(jax.jit, static_argnames=('memory_size',))
-def _lbfgs_run(model, lmbd, args, carry, kmax, tol, patience, memory_size):
+def _lbfgs_run(model, lmbd, args, carry, kmax, tol, patience, memory_size,
+               approx_dec_rtol):
     """Steps of optax.lbfgs until iteration 'kmax' or a stop."""
-    opt = optax.lbfgs(memory_size=memory_size)
+    opt = _lbfgs(memory_size, approx_dec_rtol)
 
     def f(w):
         return model._loss(w, lmbd, *args)
@@ -263,22 +275,35 @@ class lbfgs(_optax):
                       stops when the largest gradient component is below
                       tol (default 1e-10)
         patience    - the run stops after this many steps in a row without
-                      improvement (default 5)
+                      improvement (default 20; in float32 the line search
+                      fails for some steps in a row near the end, and then
+                      recovers)
         memory_size - number of stored corrections (default 10)
+        approx_dec_rtol - the zoom line search of optax switches to the
+                      approximate Wolfe conditions of Hager and Zhang once
+                      the loss is within this relative distance of its
+                      value at the start of the line search (default 1e-3;
+                      None: never). The exact conditions compare losses,
+                      which in float32 differ in rounding only near the
+                      end of a training, so the line search fails there;
+                      optax's default 1e-6 stops the trainings early
         chunk       - iterations between calls of 'callback' (default 100)
 
     The best weights of the run are returned: a step that raises the loss
     (when the line search fails in float32) is never kept.
     """
-    patience = 5
+    patience = 20
     memory_size = 10
+    approx_dec_rtol = 1e-3
 
     def _init(self, w):
         return _lbfgs_init(w, self.memory_size)
 
     def _run(self, model, lmbd, args, carry, kmax, n):
         return _lbfgs_run(model, lmbd, args, carry, kmax, self.tol,
-                          self._patience(), self.memory_size)
+                          self._patience(), self.memory_size,
+                          None if self.approx_dec_rtol is None
+                          else float(self.approx_dec_rtol))
 
 
 @jax.jit

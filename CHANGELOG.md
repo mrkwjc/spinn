@@ -26,7 +26,11 @@
 ### Added
 
 - **Optimizer classes** in the new module `spinn.optimize`, like the
-  balancers: `lbfgs` (options `tol`, `patience`, `memory_size`, `chunk`),
+  balancers: `lbfgs` (options `tol`, `patience` (20), `memory_size`,
+  `approx_dec_rtol` (1e-3, the switch of optax's line search to the
+  approximate Wolfe conditions, which work in float32 near the end of a
+  training; optax's 1e-6 stops trainings early: 2–10× larger errors on the
+  examples), `chunk`),
   `adam` (Adam of optax on the device; learning rate `lr`, a number or a
   schedule over the whole training, e.g. `adam(lr=1e-2)`; its runs do not
   converge, so balancers with phases, e.g. `'curvsens'`, move on once the

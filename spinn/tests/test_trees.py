@@ -665,6 +665,31 @@ class TestOptimize:
                     balance=balance.curv(inner=50), monitor=10)
         assert len(r.monitor.rows) > 5
         assert optimize._lbfgs_run._cache_size() == n
+        # other values of the options are not compiled again
+        N = fit2([1, 8, 1], f=jnp.tanh, key=5)
+        N.train(x, t, maxiter=100, method=optimize.lbfgs(
+            approx_dec_rtol=1e-5, patience=7, tol=1e-8))
+        assert optimize._lbfgs_run._cache_size() == n
+
+    def test_lbfgs_linesearch(self, monkeypatch):
+        # 'approx_dec_rtol' reaches the zoom line search of optax, traced
+        # (None as is: a compilation of its own)
+        assert optimize.lbfgs.patience == 20
+        assert optimize.lbfgs.approx_dec_rtol == 1e-3
+        seen = []
+        zoom = optax.scale_by_zoom_linesearch
+
+        def spy(**kw):
+            seen.append(kw['approx_dec_rtol'])
+            return zoom(**kw)
+        monkeypatch.setattr(optimize.optax, 'scale_by_zoom_linesearch', spy)
+        x, t = data()
+        for a in (1e-3, None):
+            N = spinn([1, 5, 1], f=jnp.tanh, key=1)   # a network of its own
+            r = N.train(x, t, maxiter=50,
+                        method=optimize.lbfgs(approx_dec_rtol=a))
+            assert r.nit > 0 and np.isfinite(r.fun)
+        assert isinstance(seen[0], jax.Array) and seen[-1] is None
 
     def test_adam(self):
         x, t = data()
