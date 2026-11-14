@@ -329,13 +329,15 @@ class adam(_optax):
                    improvement (default None, no stop)
         warmup   - the learning rate rises linearly from lr/warmup to lr in
                    the first 'warmup' steps of each run, at most a tenth of
-                   the run (default 100; 0: none). The moments start from
-                   zero in each run, so the first steps are about
+                   the run (default 0, none; e.g. 100). The moments start
+                   from zero in each run, so the first steps are about
                    lr*sign(gradient) for every weight, however small the
-                   gradient: without warmup this jump can throw a nearly
-                   converged network so far that the run never gets back
-                   below its starting loss, and the training stalls at
-                   those weights
+                   gradient: this jump can throw a nearly converged network
+                   so far that the run never gets back below its starting
+                   loss and returns the weights it started from (two such
+                   runs in a row end the training, see 'spinn.balance');
+                   warmup keeps such runs moving, though in tests not to a
+                   better accuracy
         chunk    - iterations between calls of 'callback' (default 100)
         anytime  - (default True) see 'optimizer'; e.g. 'curvsens' moves to
                    sensitivities once the curv lambdas settle, and the last
@@ -359,7 +361,7 @@ class adam(_optax):
     b1 = .9
     b2 = .999
     eps = 1e-8
-    warmup = 100
+    warmup = 0
     _k = 0
 
     def _init(self, w):

@@ -805,7 +805,7 @@ class TestOptimize:
         x, t = data()
         N = fit2([1, 8, 1], f=jnp.tanh, key=1)
         lmbd = jnp.ones(2, N.w.dtype)
-        assert optimize.adam.warmup == 100
+        assert optimize.adam.warmup == 0
 
         def path(warmup, n, nrun=1000):  # weights after n steps of a run
             o = optimize.adam(lr=1e-2, warmup=warmup)
