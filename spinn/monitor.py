@@ -367,15 +367,17 @@ class monitor:
              fname=None, **kwargs):
         """Terms, loss, lambdas and metrics of training 'train' (index,
         default the last one) against iterations (x='it') or time in seconds
-        (x='t'). 'labels' names the terms (a list, one per term; default
-        'term i'). Each term has its own marker (also its lambda); own
-        'marker', 'ms' or 'markevery' apply to all curves. 'grid' draws a
-        light grid (True at the powers of ten, 'both' also between them,
-        False none). 'vlines' draws vertical lines (default False): at the
-        lambda updates, at the changes of the phase of the balancer (e.g.
-        'curvsens' from curv to sens) and at the resumes, explained in a
-        legend in the loss axes. Other keyword arguments go to every curve
-        (matplotlib, e.g. ls=':').
+        (x='t'). 'labels' names the terms: one per term of this training,
+        or one per term column of the monitor (when its trainings have
+        different numbers of terms); default 'term i'. Each term has its
+        own marker (also its lambda); own 'marker', 'ms' or 'markevery'
+        apply to all curves. 'grid' draws a light grid (True at the powers
+        of ten, 'both' also between them, False none). 'vlines' draws
+        vertical lines (default False): at the lambda updates, at the
+        changes of the phase of the balancer (e.g. 'curvsens' from curv to
+        sens) and at the resumes, explained in a legend in the loss axes.
+        Other keyword arguments go to every curve (matplotlib, e.g.
+        ls=':').
         Saved to 'fname' if given; returns the figure (axes: terms, loss,
         lambdas, metrics) to change further."""
         import matplotlib.pyplot as plt
@@ -392,14 +394,19 @@ class monitor:
         it = h[x][s]
         cols = ~np.all(np.isnan(h['terms'][s]), axis=0)  # its own terms
         idx = np.flatnonzero(cols)
-        if labels is not None and len(labels) < h['terms'].shape[1]:
-            raise ValueError("%d labels for %d terms"
-                             % (len(labels), h['terms'].shape[1]))
+        if labels is None:
+            tnames = ['term %d' % i for i in idx]
+        elif len(labels) == len(idx):   # the terms of this training
+            tnames = list(labels)
+        elif len(labels) == h['terms'].shape[1]:    # all term columns
+            tnames = [labels[i] for i in idx]
+        else:
+            raise ValueError("%d labels for %d terms" % (len(labels),
+                                                         len(idx)))
         _markers(ax[0].semilogy(it, h['terms'][s][:, cols], **kwargs),
                  kwargs)
         ax[0].set_ylabel('terms')
-        ax[0].legend(['term %d' % i if labels is None else labels[i]
-                      for i in idx], fontsize='small')
+        ax[0].legend(tnames, fontsize='small')
         _markers(ax[1].semilogy(it, h['loss'][s], **kwargs), kwargs)
         ax[1].set_ylabel('loss')
         _markers(ax[2].semilogy(it, h['lmbd'][s][:, cols], **dict(

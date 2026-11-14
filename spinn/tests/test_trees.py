@@ -1000,6 +1000,13 @@ class TestMonitor:
         assert [x.get_text() for x in fig.axes[0].get_legend().get_texts()] \
             == ['term 0']
         m.compare('terms', term=1)
+        # its labels: one per own term, or one per term column
+        for labels in (['eq'], ['eq', 'other']):
+            fig = m.plot(labels=labels)
+            assert [x.get_text()
+                    for x in fig.axes[0].get_legend().get_texts()] == ['eq']
+        with pytest.raises(ValueError):
+            m.plot(labels=['eq', 'other', 'more'])
         # own labels and matplotlib options
         fig = m.plot(train=0, labels=['fit', 'ends'], ls=':', marker='o')
         assert [x.get_text() for x in fig.axes[0].get_legend().get_texts()] \
