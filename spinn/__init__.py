@@ -9,4 +9,4 @@ from .utils import hcube, left, right, bottom, top
 from .graphs import mlgraph
 from .monitor import monitor
 from .result import result
-from . import balance, optimize
+from . import balance, optimize, training

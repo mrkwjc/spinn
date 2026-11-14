@@ -64,6 +64,13 @@
   `result.load(fname, model=False)` only results, monitor and the network
   as a plain `spinn` (`res.network`), without the class of the problem.
 
+- **`spinn.training`:** the training loop moved out of the network class
+  into the trainer `spinn.training.trainer`, which holds the data,
+  optimizer, balancer and their state of one training; it is `res.state`
+  of results. `P.train` and `P.resume` are unchanged and use it;
+  `trainer(args, method=..., balance=...).fit(P, maxiter)` trains
+  directly, and each further `fit` goes on.
+
 ### Fixed
 
 - `'sens'` lambdas when a term is exactly zero (in float32): the other

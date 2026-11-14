@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from spinn import utils, graphs, spinn, balance, optimize, monitor, result
+from spinn import training
 
 
 # Reference layered network, independent of spinn
@@ -1011,6 +1012,25 @@ class TestResume:
         assert r2.state.args[0].shape == (40, 1)
         h = r.monitor.history
         assert set(h['seed'][h['resume'] == 1]) == {r.seed}
+
+    def test_trainer(self):
+        # a trainer used directly: fit, fit on = train, then resume
+        x, t = data()
+        b = balance.curv(inner=100)
+        N = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        tr = training.trainer((x, t), method='adam', balance=b)
+        assert tr.lmbd is None and tr.b is not b      # own copy
+        r = tr.fit(N, maxiter=200)
+        assert r.state is tr and tr.nit == 200
+        r2 = tr.fit(N, maxiter=100)                   # tr goes on
+        assert r2.state is tr and tr.nit == 300
+        M = fit2([1, 8, 1], f=jnp.tanh, key=1)
+        r3 = M.train(x, t, method='adam', maxiter=200, balance=b)
+        r3 = M.resume(r3, maxiter=100)
+        np.testing.assert_allclose(N.w, M.w, rtol=1e-5, atol=1e-7)
+        np.testing.assert_allclose(r2.lmbd, r3.lmbd, rtol=1e-5)
+        with pytest.raises(TypeError, match='unexpected'):
+            training.trainer((x, t), method='adam', options={})
 
 
 class TestResult:

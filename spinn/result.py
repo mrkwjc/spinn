@@ -149,9 +149,9 @@ def _state_plain(st, arrays, data):
 
 def _state_from_plain(plain, arrays):
     from spinn import storage
-    from spinn.trees import _trainstate
+    from spinn.training import trainer
     d = storage.decode(plain, arrays)
-    st = _trainstate.__new__(_trainstate)
+    st = trainer.__new__(trainer)
     st.__dict__.update(d)
     st.args = d.get('args')     # None: not stored, 'resume' needs them
     st.monitor = None
