@@ -40,6 +40,10 @@ class spinn:
     inputs and outputs.
     """
 
+    # structure of the network: static pytree data, saved by 'save'
+    _AUX = ('nlst', 'n', 'inps', 'outs', 'ni', 'no', 'nw', 'nb', 'wshp',
+            'f', 'sparse')
+
     def __init__(self, G, f=None, p=None,
                  initx=None, inity=None,
                  key=None,
@@ -344,17 +348,7 @@ class spinn:
 
     def _tree_flatten(self):
         children = (self.w, self.p)     # dynamic values
-        aux_data = {'nlst': self.nlst,
-                    'n': self.n,
-                    'inps': self.inps,
-                    'outs': self.outs,
-                    'ni': self.ni,
-                    'no': self.no,
-                    'nw': self.nw,
-                    'nb': self.nb,
-                    'wshp': self.wshp,
-                    'f': self.f,
-                    'sparse': self.sparse}  # static values
+        aux_data = {k: getattr(self, k) for k in self._AUX}  # static
         return (children, aux_data)
 
     @classmethod
@@ -406,16 +400,14 @@ class spinn:
         for i, pi in enumerate(p):
             for j, pij in enumerate(pi):
                 arrays['p_%d_%d' % (i, j)] = np.asarray(pij)
-        cls = type(self)
         meta = dict(aux, nparams=[len(pi) for pi in p],
-                    cls='%s.%s' % (cls.__module__, cls.__qualname__))
+                    cls=storage.path(type(self)))
         return meta, arrays
 
     @classmethod
     def _from_plain(cls, meta, arrays):
-        aux = {k: meta[k] for k in ('nlst', 'n', 'inps', 'outs', 'ni', 'no',
-                                    'nw', 'nb', 'f', 'sparse')}
-        aux['wshp'] = [storage.tuples(e) for e in meta['wshp']]
+        aux = {k: meta[k] for k in cls._AUX}
+        aux['wshp'] = [storage.tuples(e) for e in meta['wshp']]  # JSON lists
         w = jnp.asarray(arrays['w'])
         p = [[jnp.asarray(arrays['p_%d_%d' % (i, j)]) for j in range(n)]
              for i, n in enumerate(meta['nparams'])]
@@ -434,18 +426,20 @@ class spinn:
         if storage.isnpz(fname):
             arrays, meta = storage.load(fname, 'spinn.network')
             return cls._from_plain(meta, arrays)
+        return cls._load_pickle(fname)
+
+    @classmethod
+    def _load_pickle(cls, fname):
+        """Network from a file of spinn 0.3 and older (pickled lists)."""
         warnings.warn("%s is in the old format of spinn 0.3 (pickle), which "
                       "will not be read in the future; save it again with "
-                      "'save'" % fname, FutureWarning, stacklevel=2)
+                      "'save'" % fname, FutureWarning, stacklevel=3)
         with open(fname, 'rb') as f:
             (children, aux_data) = pickle.load(f)
-        # make arrays again
         wlst, plst = children[:2]
         w = jnp.asarray(wlst)
         p = [[jnp.asarray(pij) for pij in pi] for pi in plst]
-        children = (w, p)
-        #
-        obj = cls._tree_unflatten(aux_data, children)
+        obj = cls._tree_unflatten(aux_data, (w, p))
         obj._register_pytree()
         return obj
 

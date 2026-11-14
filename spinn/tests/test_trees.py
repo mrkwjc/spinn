@@ -1183,7 +1183,7 @@ class TestActivations:
             meta = json.loads(str(z['__meta__']))
             np.testing.assert_array_equal(z['w'], N.w)
         assert meta['format'] == 'spinn.network'
-        assert meta['cls'] == 'spinn.trees.spinn' and meta['ni'] == 1
+        assert meta['cls'] == 'spinn.trees:spinn' and meta['ni'] == 1
         # not a network file
         from spinn import storage
         storage.save(fname, 'other', 1, {})
